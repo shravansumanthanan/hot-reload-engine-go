@@ -1,0 +1,21 @@
+time=2026-03-07T14:47:40.741+05:30 level=INFO msg="Starting hotreload" root=./testserver build="go build -o testserver/bin ./testserver" exec=./testserver/bin
+time=2026-03-07T14:47:40.741+05:30 level=DEBUG msg="Watching directory" path=./testserver
+time=2026-03-07T14:47:40.741+05:30 level=INFO msg="Running build" cmd="go build -o testserver/bin ./testserver"
+time=2026-03-07T14:47:40.919+05:30 level=INFO msg="Build succeeded"
+time=2026-03-07T14:47:40.919+05:30 level=INFO msg="Starting process" cmd=./testserver/bin
+2026/03/07 14:47:41 Starting server on port 8081...
+time=2026-03-07T14:48:02.161+05:30 level=DEBUG msg="File changed" event=testserver/main.go
+time=2026-03-07T14:48:02.261+05:30 level=INFO msg="Changes detected, scheduling rebuild"
+time=2026-03-07T14:48:02.261+05:30 level=INFO msg="Stopping running process for rebuild"
+2026/03/07 14:48:02 Received signal: terminated, gracefully shutting down...
+2026/03/07 14:48:02 Server exiting
+time=2026-03-07T14:48:02.465+05:30 level=DEBUG msg="Process exited gracefully"
+time=2026-03-07T14:48:02.465+05:30 level=INFO msg="Running build" cmd="go build -o testserver/bin ./testserver"
+time=2026-03-07T14:48:03.593+05:30 level=INFO msg="Build succeeded"
+time=2026-03-07T14:48:03.593+05:30 level=INFO msg="Starting process" cmd=./testserver/bin
+2026/03/07 14:48:04 Starting server on port 8081...
+time=2026-03-07T14:49:32.538+05:30 level=INFO msg="Received interrupt, shutting down..."
+2026/03/07 14:49:32 Received signal: terminated, gracefully shutting down...
+2026/03/07 14:49:32 Server exiting
+time=2026-03-07T14:49:32.741+05:30 level=DEBUG msg="Process exited gracefully"
+time=2026-03-07T14:49:32.741+05:30 level=WARN msg="Process exited unexpectedly"
