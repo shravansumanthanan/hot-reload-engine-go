@@ -118,3 +118,6 @@ go build -o hotreload .
             --build "go build -o ./bin/server ./your-project/main.go" \
             --exec "./bin/server"
 ```
+
+### 4. Video
+(uploading soon)
