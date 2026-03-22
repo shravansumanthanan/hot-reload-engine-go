@@ -1,0 +1,30 @@
+# Binaries
+hotreload
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Hotreload config (user-specific)
+.hotreload.yaml
+
+# Temp files
+*.tmp
+*.log

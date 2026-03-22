@@ -1,0 +1,19 @@
+# .hotreloadignore
+# Add directory names (one per line) to ignore during file watching
+# Lines starting with # are comments
+
+# Custom build directories
+dist
+out
+target
+
+# Generated code
+generated
+mocks
+
+# Documentation
+docs
+
+# Test data
+testdata
+fixtures

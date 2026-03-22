@@ -16,15 +16,6 @@ import (
 	"hotreload/watcher"
 )
 
-const (
-	defaultDebounceDelay    = 100 * time.Millisecond
-	defaultReloadBroadcastDelay = 300 * time.Millisecond
-	defaultCrashThreshold  = 1 * time.Second
-	defaultMaxBackoff      = 10 * time.Second
-	defaultWatchExtensions = ".go"
-	defaultRootPath        = "."
-)
-
 func main() {
 	rootPath := flag.String("root", defaultRootPath, "Project root directory to watch")
 	buildCommand := flag.String("build", "", "Command to build the project")
@@ -33,11 +24,37 @@ func main() {
 	ignoreFlag := flag.String("ignore", "", "Comma-separated list of directories to ignore")
 	proxyFlag := flag.String("proxy", "", "Enable live-reload proxy. Format: <listen_port>:<target_port> (e.g. 8080:8081)")
 	logLevel := flag.String("log-level", "debug", "Log level: debug, info, warn, error")
+	configPath := flag.String("config", ".hotreload.yaml", "Path to configuration file")
+	initConfig := flag.Bool("init", false, "Generate example .hotreload.yaml configuration file")
 
 	flag.Parse()
 
+	// Handle --init flag to generate example config
+	if *initConfig {
+		if err := WriteExampleConfig(*configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write config file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Created example configuration file: %s\n", *configPath)
+		fmt.Println("Edit this file and run hotreload again.")
+		return
+	}
+
+	// Load configuration file if it exists
+	cfg, err := LoadConfig(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Merge config file with CLI flags (CLI flags take precedence)
+	if cfg != nil {
+		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel)
+	}
+
 	if *buildCommand == "" || *execCommand == "" {
 		fmt.Fprintln(os.Stderr, "Usage: hotreload --root <path> --build <build_cmd> --exec <exec_cmd>")
+		fmt.Fprintln(os.Stderr, "   or: hotreload --init  (to generate example config file)")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}

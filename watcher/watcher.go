@@ -63,6 +63,16 @@ func New(root string, exts []string, ignores []string) (*Watcher, error) {
 		}
 	}
 
+	// Load .hotreloadignore file if it exists
+	hotreloadIgnores, err := loadHotreloadIgnore(root)
+	if err != nil {
+		slog.Warn("Failed to load .hotreloadignore", "err", err)
+	} else {
+		for _, ign := range hotreloadIgnores {
+			ignMap[ign] = true
+		}
+	}
+
 	validExts := []string{}
 	for _, ext := range exts {
 		if ext != "" {
@@ -196,4 +206,33 @@ func isTempFile(path string) bool {
 		}
 	}
 	return false
+}
+
+// loadHotreloadIgnore reads the .hotreloadignore file and returns a list of patterns to ignore
+func loadHotreloadIgnore(root string) ([]string, error) {
+	ignorePath := filepath.Join(root, ".hotreloadignore")
+	data, err := os.ReadFile(ignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // File doesn't exist, not an error
+		}
+		return nil, err
+	}
+
+	var patterns []string
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+
+	if len(patterns) > 0 {
+		slog.Info("Loaded custom ignore patterns from .hotreloadignore", "count", len(patterns))
+	}
+
+	return patterns, nil
 }

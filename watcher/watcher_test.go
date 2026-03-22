@@ -293,3 +293,64 @@ func TestWatcherCustomIgnores(t *testing.T) {
 		// Good
 	}
 }
+
+func TestHotreloadIgnoreFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a .hotreloadignore file
+	ignoreContent := `# Comment line
+custom_dir
+another_dir
+
+# Another comment
+third_dir
+`
+	ignoreFile := filepath.Join(dir, ".hotreloadignore")
+	if err := os.WriteFile(ignoreFile, []byte(ignoreContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create watcher - should load .hotreloadignore
+	w, err := New(dir, []string{".go"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	// Verify custom directories are ignored
+	if !w.ignores["custom_dir"] {
+		t.Error("Expected custom_dir to be ignored")
+	}
+	if !w.ignores["another_dir"] {
+		t.Error("Expected another_dir to be ignored")
+	}
+	if !w.ignores["third_dir"] {
+		t.Error("Expected third_dir to be ignored")
+	}
+
+	if err := w.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a custom ignored directory
+	customDir := filepath.Join(dir, "custom_dir")
+	if err := os.Mkdir(customDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Create a file inside the ignored directory
+	ignoredFile := filepath.Join(customDir, "test.go")
+	if err := os.WriteFile(ignoredFile, []byte("package test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should NOT receive an event
+	select {
+	case event := <-w.Events:
+		t.Fatalf("Did not expect event for .hotreloadignore'd directory, got: %s", event)
+	case <-time.After(300 * time.Millisecond):
+		// Good - no event received
+	}
+}
