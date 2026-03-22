@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Runner struct {
 	cmd    *exec.Cmd
 	exited chan struct{}
 	err    error
+	mu     sync.Mutex
 }
 
 // NewRunner creates a new Runner.
@@ -32,6 +34,9 @@ func NewRunner(cmdStr string) *Runner {
 
 // Run executes the command using the OS-specific shell.
 func (r *Runner) Run() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.cmd = getShellCmd(r.cmdStr)
 	r.cmd.Stdout = os.Stdout
 	r.cmd.Stderr = os.Stderr
@@ -55,23 +60,33 @@ func (r *Runner) Run() error {
 
 // Wait waits for the process to exit.
 func (r *Runner) Wait() error {
-	if r.cmd == nil || r.cmd.Process == nil {
+	r.mu.Lock()
+	cmd := r.cmd
+	exited := r.exited
+	r.mu.Unlock()
+
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	<-r.exited
+	<-exited
 	return r.err
 }
 
 // Stop gracefully shuts down the process, falling back to forceful kill.
 func (r *Runner) Stop() {
-	if r.cmd == nil || r.cmd.Process == nil {
+	r.mu.Lock()
+	cmd := r.cmd
+	exited := r.exited
+	r.mu.Unlock()
+
+	if cmd == nil || cmd.Process == nil {
 		return
 	}
 
-	err := terminateProcess(r.cmd)
+	err := terminateProcess(cmd)
 	if err != nil {
 		slog.Error("Failed to terminate cleanly", "err", err)
-		_ = killProcess(r.cmd)
+		_ = killProcess(cmd)
 		return
 	}
 
@@ -83,14 +98,15 @@ func (r *Runner) Stop() {
 	case <-ctx.Done():
 		// Timeout reached, forceful kill
 		slog.Warn("Process did not exit gracefully, sending KILL")
-		_ = killProcess(r.cmd)
-		// We DO NOT block on <-done here to avoid locking up if the process is a zombie (D-state)
-	case <-r.exited:
+		_ = killProcess(cmd)
+	case <-exited:
 		// Exited gracefully
 		slog.Debug("Process exited gracefully")
 	}
 
+	r.mu.Lock()
 	r.cmd = nil
+	r.mu.Unlock()
 }
 
 // Build executes a short-lived build command and waits for it to finish.
@@ -119,7 +135,13 @@ func Build(ctx context.Context, cmdStr string) error {
 		if cmd.Process != nil {
 			_ = killProcess(cmd)
 		}
-		// DO NOT block on <-done to avoid zombie locks
+		// Wait for the process to actually exit with a timeout
+		select {
+		case <-done:
+			// Process exited
+		case <-time.After(1 * time.Second):
+			// Timeout waiting for process to die
+		}
 		err = ctx.Err()
 	case err = <-done:
 		// Process finished

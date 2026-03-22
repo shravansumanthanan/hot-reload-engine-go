@@ -47,7 +47,13 @@ func (d *Debouncer) run() {
 		select {
 		case <-d.events:
 			if timer != nil {
-				timer.Stop()
+				if !timer.Stop() {
+					// Timer already fired, drain the channel
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 			}
 			timer = time.NewTimer(d.duration)
 			timerC = timer.C
@@ -59,7 +65,13 @@ func (d *Debouncer) run() {
 
 		case <-d.stop:
 			if timer != nil {
-				timer.Stop()
+				if !timer.Stop() {
+					// Timer already fired, drain the channel
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 			}
 			return
 		}

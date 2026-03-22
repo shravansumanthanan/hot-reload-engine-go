@@ -23,6 +23,7 @@ type Manager struct {
 
 	mu        sync.Mutex
 	triggerCh chan struct{}
+	stopCh    chan struct{}
 
 	crashCount int
 	lastStart  time.Time
@@ -35,6 +36,7 @@ func NewManager(buildCmd, execCmd string, liveProxy *proxy.Proxy) *Manager {
 		execCmd:   execCmd,
 		liveProxy: liveProxy,
 		triggerCh: make(chan struct{}, 1),
+		stopCh:    make(chan struct{}),
 	}
 	go m.loop()
 	return m
@@ -57,20 +59,29 @@ func (m *Manager) TriggerBuild() {
 
 // Stop terminates any in-progress build and running process.
 func (m *Manager) Stop() {
+	close(m.stopCh)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.buildCancel != nil {
 		m.buildCancel()
+		m.buildCancel = nil
 	}
 	if m.runner != nil {
 		m.runner.Stop()
+		m.runner = nil
 	}
 }
 
 func (m *Manager) loop() {
-	for range m.triggerCh {
-		m.runCycle()
+	for {
+		select {
+		case <-m.triggerCh:
+			m.runCycle()
+		case <-m.stopCh:
+			return
+		}
 	}
 }
 
@@ -94,6 +105,12 @@ func (m *Manager) runCycle() {
 
 	// Run build — blocks but is cancellable via context.
 	err := process.Build(buildCtx, m.buildCmd)
+	
+	m.mu.Lock()
+	// Clear the build cancel function after build completes or fails
+	m.buildCancel = nil
+	m.mu.Unlock()
+
 	if err != nil {
 		if buildCtx.Err() != nil {
 			return // Build was cancelled by a newer file change.
@@ -112,6 +129,7 @@ func (m *Manager) runCycle() {
 	err = m.runner.Run()
 	if err != nil {
 		slog.Error("Failed to start server", "err", err)
+		m.runner = nil
 		m.mu.Unlock()
 		return
 	}
@@ -126,11 +144,11 @@ func (m *Manager) runCycle() {
 	}
 
 	runnerRef := m.runner
-	m.lastStart = time.Now()
+	lastStart := time.Now()
 	m.mu.Unlock()
 
 	// Monitor the process for unexpected exits (crashes).
-	go func(runner *process.Runner) {
+	go func(runner *process.Runner, startTime time.Time) {
 		_ = runner.Wait()
 
 		m.mu.Lock()
@@ -144,7 +162,7 @@ func (m *Manager) runCycle() {
 
 			// Crash loop protection: if the process dies very quickly,
 			// back off before retrying to avoid a tight restart loop.
-			duration := time.Since(m.lastStart)
+			duration := time.Since(startTime)
 			if duration < defaultCrashThreshold {
 				m.crashCount++
 				backoff := time.Duration(m.crashCount) * time.Second
@@ -164,5 +182,5 @@ func (m *Manager) runCycle() {
 				m.crashCount = 0
 			}
 		}
-	}(runnerRef)
+	}(runnerRef, lastStart)
 }
