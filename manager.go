@@ -26,7 +26,6 @@ type Manager struct {
 	stopCh    chan struct{}
 
 	crashCount int
-	lastStart  time.Time
 }
 
 // NewManager creates a Manager and starts its background loop.
@@ -133,6 +132,9 @@ func (m *Manager) runCycle() {
 		m.mu.Unlock()
 		return
 	}
+
+	// Reset crash count on successful start
+	m.crashCount = 0
 
 	// Notify live-reload proxy clients after a short delay to let the
 	// server finish binding its port.

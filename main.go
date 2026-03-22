@@ -115,8 +115,13 @@ func main() {
 	m := NewManager(*buildCommand, *execCommand, liveProxy)
 	defer m.Stop()
 
-	// Initial trigger
+	// Initial trigger with timeout to prevent hanging on first build
+	slog.Info("Triggering initial build")
 	m.TriggerBuild()
+
+	// Give the initial build some time to complete
+	// If it hangs, the user can still Ctrl+C to exit
+	time.Sleep(100 * time.Millisecond)
 
 	// Setup Debouncer for file events
 	db := debouncer.New(defaultDebounceDelay, func() {

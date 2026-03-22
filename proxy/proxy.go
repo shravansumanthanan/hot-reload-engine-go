@@ -180,13 +180,16 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	if isGzip {
 		bodyReader, err = gzip.NewReader(resp.Body)
 		if err != nil {
-			return err
+			slog.Warn("Failed to decompress gzip response, skipping injection", "err", err)
+			return nil // Don't fail the request, just skip injection
 		}
+		defer bodyReader.Close()
 	}
 
 	body, err := io.ReadAll(bodyReader)
 	if err != nil {
-		return err
+		slog.Warn("Failed to read response body, skipping injection", "err", err)
+		return nil // Don't fail the request
 	}
 	_ = bodyReader.Close()
 	_ = resp.Body.Close()
@@ -202,8 +205,16 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 	var newBodyBuf bytes.Buffer
 	if isGzip {
 		gz := gzip.NewWriter(&newBodyBuf)
-		_, _ = gz.Write([]byte(bodyStr))
-		_ = gz.Close()
+		_, err = gz.Write([]byte(bodyStr))
+		if err != nil {
+			slog.Warn("Failed to compress response, sending uncompressed", "err", err)
+			// Fall back to uncompressed
+			newBodyBuf.Reset()
+			newBodyBuf.WriteString(bodyStr)
+			resp.Header.Del("Content-Encoding")
+		} else {
+			_ = gz.Close()
+		}
 	} else {
 		newBodyBuf.WriteString(bodyStr)
 	}
