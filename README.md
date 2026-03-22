@@ -49,10 +49,9 @@ Building the `hotreload` CLI significantly boosted my confidence in systems prog
 
 ## 💭 How can it be improved?
 
-- **Configuration File:** Support reading from a `.hotreload.yaml` instead of relying entirely on CLI flags.
-- **Websocket Reloading:** Inject a script into HTML templates to automatically refresh the browser upon a successful backend restart.
-- **Cross-Platform Parity:** Ensure the process group killing logic has native equivalents tailored specifically for Windows (`taskkill`).
-- **Custom Ignore Rules:** Support `.hotreloadignore` files for custom watch filtering.
+- **Websocket Reloading:** Inject a script into HTML templates to automatically refresh the browser upon a successful backend restart (the live-reload proxy already supports this via SSE).
+- **Pattern Matching:** Support glob patterns in `.hotreloadignore` for more flexible ignore rules.
+- **Build Caching:** Detect when dependencies haven't changed and skip unnecessary rebuilds.
 
 ## 🚦 Running the Project & Feature Testing
 
@@ -65,11 +64,30 @@ To run `hotreload` in your local environment and see its features in action, fol
    git clone https://github.com/shravansumanthanan/hot-reload-engine-go.git
    cd hot-reload-engine-go
    ```
-2. Start the standard demo using the provided Makefile:
+
+2. **Option A:** Use configuration file (recommended):
+   ```bash
+   # Generate example configuration file
+   go build -o hotreload .
+   ./hotreload --init
+   
+   # Edit .hotreload.yaml with your settings
+   # Then run:
+   ./hotreload
+   ```
+
+3. **Option B:** Use the provided Makefile:
    ```bash
    make demo
    ```
    *This command builds the CLI, attaches to the `testserver` directory, and sets up an optional live proxy. You will see the server start up and state that it is listening.*
+
+4. **Option C:** Use CLI flags directly:
+   ```bash
+   ./hotreload --root ./your-project \
+               --build "go build -o ./bin/server ." \
+               --exec "./bin/server"
+   ```
 
 ### 2. Testing the Features
 
@@ -112,6 +130,16 @@ While `make demo` is running, try the following tests to understand how `hotrelo
 ### 3. Manual Usage
 
 If you want to run it on your own projects without the demo `Makefile`, you can build the CLI and run it manually:
+
+**Using configuration file (recommended):**
+```bash
+go build -o hotreload .
+./hotreload --init  # Creates .hotreload.yaml
+# Edit .hotreload.yaml with your project settings
+./hotreload
+```
+
+**Using CLI flags:**
 ```bash
 go build -o hotreload .
 ./hotreload --root ./your-project \
@@ -119,5 +147,74 @@ go build -o hotreload .
             --exec "./bin/server"
 ```
 
+**Custom ignore patterns:**
+Create a `.hotreloadignore` file in your project root:
+```
+# .hotreloadignore
+vendor
+generated
+docs
+testdata
+```
+
+### 4. Configuration Options
+
+**Configuration File (.hotreload.yaml):**
+```yaml
+root: .
+build: "go build -o ./bin/server ."
+exec: "./bin/server"
+extensions:
+  - .go
+  - .mod
+ignore:
+  - vendor
+  - tmp
+proxy: "8080:8081"
+log_level: info
+```
+
+**CLI Flags (override config file):**
+- `--root` - Project root directory to watch
+- `--build` - Command to build the project
+- `--exec` - Command to execute the built binary
+- `--ext` - Comma-separated file extensions to watch
+- `--ignore` - Comma-separated directories to ignore
+- `--proxy` - Live-reload proxy (format: listen_port:target_port)
+- `--log-level` - Log level (debug, info, warn, error)
+- `--config` - Path to config file (default: .hotreload.yaml)
+- `--init` - Generate example configuration file
+
 ### 4. Video
 (uploading soon)
+
+## 🔧 Recent Improvements
+
+This project has been significantly improved with the following fixes and features:
+
+**Concurrency & Reliability:**
+- Fixed all race conditions detected by Go's race detector
+- Added proper mutex protection for shared state
+- Fixed goroutine leaks in debouncer and process management
+- Implemented clean shutdown with proper resource cleanup
+- Fixed crash count reset logic for better error recovery
+
+**Cross-Platform Support:**
+- Improved Windows process group management with `CREATE_NEW_PROCESS_GROUP`
+- Proper graceful termination on Windows (SIGTERM before SIGKILL equivalent)
+- Better error handling for platform-specific operations
+
+**Configuration & Usability:**
+- Added `.hotreload.yaml` configuration file support
+- CLI flags override config file values for flexibility
+- `--init` flag to generate example configuration
+- Added `.hotreloadignore` for custom directory ignore patterns
+- Improved error messages and logging
+
+**Code Quality:**
+- All tests pass with `-race` flag enabled
+- Comprehensive test coverage across all packages
+- Better error handling in proxy for malformed responses
+- Removed unused fields and dead code
+
+All changes maintain backward compatibility with existing usage patterns.
