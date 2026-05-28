@@ -1,7 +1,10 @@
 package process
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -18,6 +21,50 @@ const (
 	// to exit after receiving SIGKILL.
 	buildKillTimeout = 1 * time.Second
 )
+
+// prefixWriter wraps an io.Writer and prepends a fixed prefix to every line.
+// This keeps build and app output visually distinct from hotreload's own logs.
+type prefixWriter struct {
+	prefix []byte
+	w      io.Writer
+	buf    bytes.Buffer
+	mu     sync.Mutex
+}
+
+func newPrefixWriter(prefix string, w io.Writer) *prefixWriter {
+	return &prefixWriter{prefix: []byte(prefix), w: w}
+}
+
+func (pw *prefixWriter) Write(p []byte) (n int, err error) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+
+	pw.buf.Write(p)
+	for {
+		line, after, found := bytes.Cut(pw.buf.Bytes(), []byte("\n"))
+		if !found {
+			break
+		}
+		_, err = fmt.Fprintf(pw.w, "%s%s\n", pw.prefix, line)
+		if err != nil {
+			return 0, err
+		}
+		pw.buf.Reset()
+		pw.buf.Write(after)
+	}
+	return len(p), nil
+}
+
+// Flush writes any remaining buffered bytes (no trailing newline) to the
+// underlying writer so output is never silently dropped.
+func (pw *prefixWriter) Flush() {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	if pw.buf.Len() > 0 {
+		_, _ = fmt.Fprintf(pw.w, "%s%s\n", pw.prefix, pw.buf.Bytes())
+		pw.buf.Reset()
+	}
+}
 
 // Runner manages a long-running process like a server.
 type Runner struct {
@@ -42,8 +89,10 @@ func (r *Runner) Run() error {
 	defer r.mu.Unlock()
 
 	r.cmd = getShellCmd(r.cmdStr)
-	r.cmd.Stdout = os.Stdout
-	r.cmd.Stderr = os.Stderr
+
+	pw := newPrefixWriter("[app] ", os.Stdout)
+	r.cmd.Stdout = pw
+	r.cmd.Stderr = pw
 
 	setSysProcAttr(r.cmd)
 
@@ -60,6 +109,7 @@ func (r *Runner) Run() error {
 
 	go func() {
 		r.err = r.cmd.Wait()
+		pw.Flush()
 		close(r.exited)
 	}()
 
@@ -121,8 +171,10 @@ func (r *Runner) Stop() {
 func Build(ctx context.Context, cmdStr string) error {
 	slog.Info("Running build", "cmd", cmdStr)
 	cmd := getShellCmdContext(ctx, cmdStr)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	pw := newPrefixWriter("[build] ", os.Stdout)
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
 	setSysProcAttr(cmd)
 
@@ -135,6 +187,7 @@ func Build(ctx context.Context, cmdStr string) error {
 	done := make(chan error, 1) // Buffered so goroutine won't block forever
 	go func() {
 		done <- cmd.Wait()
+		pw.Flush()
 	}()
 
 	select {

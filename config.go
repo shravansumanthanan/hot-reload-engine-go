@@ -1,26 +1,65 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the hotreload configuration file structure
+// Config represents the hotreload configuration file structure.
 type Config struct {
-	Root       string   `yaml:"root"`
-	Build      string   `yaml:"build"`
-	Exec       string   `yaml:"exec"`
-	Extensions []string `yaml:"extensions"`
-	Ignore     []string `yaml:"ignore"`
-	Proxy      string   `yaml:"proxy"`
-	LogLevel   string   `yaml:"log_level"`
+	Root        string   `yaml:"root"`
+	Build       string   `yaml:"build"`
+	Exec        string   `yaml:"exec"`
+	Extensions  []string `yaml:"extensions"`
+	Ignore      []string `yaml:"ignore"`
+	Proxy       string   `yaml:"proxy"`
+	LogLevel    string   `yaml:"log_level"`
+	HealthCheck string   `yaml:"health_check"` // optional HTTP URL polled before broadcasting reload
 }
 
-// LoadConfig attempts to load configuration from a .hotreload.yaml file
-// Returns nil if the file doesn't exist (not an error)
+// validProxyFormat matches "<listen_port>:<target_port>" e.g. "8080:8081".
+var validProxyFormat = regexp.MustCompile(`^\d+:\d+$`)
+
+// Validate checks that the configuration values are semantically correct.
+// It returns an error describing the first problem found, or nil if everything
+// is valid. Validate should be called after MergeWithFlags so that CLI flags
+// have already been applied.
+func (c *Config) Validate() error {
+	if c.Root != "" {
+		if _, err := os.Stat(c.Root); os.IsNotExist(err) {
+			return fmt.Errorf("root directory %q does not exist", c.Root)
+		}
+	}
+
+	if c.Proxy != "" && !validProxyFormat.MatchString(c.Proxy) {
+		return fmt.Errorf("invalid proxy value %q: expected format <listen_port>:<target_port> (e.g. 8080:8081)", c.Proxy)
+	}
+
+	if c.LogLevel != "" {
+		switch strings.ToLower(c.LogLevel) {
+		case "debug", "info", "warn", "error":
+			// valid
+		default:
+			return fmt.Errorf("invalid log_level %q: must be one of debug, info, warn, error", c.LogLevel)
+		}
+	}
+
+	if c.HealthCheck != "" {
+		if !strings.HasPrefix(c.HealthCheck, "http://") && !strings.HasPrefix(c.HealthCheck, "https://") {
+			return fmt.Errorf("invalid health_check %q: must be an http:// or https:// URL", c.HealthCheck)
+		}
+	}
+
+	return nil
+}
+
+// LoadConfig attempts to load configuration from a .hotreload.yaml file.
+// Returns nil if the file doesn't exist (not an error).
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -126,20 +165,28 @@ extensions:
   - .go
   - .mod
 
-# Directories to ignore (optional, adds to default ignores)
+# Directories or glob patterns to ignore (optional, adds to default ignores).
+# Standard shell globs (*, ?, [abc]) are supported.
 ignore:
   - vendor
   - tmp
+  - "*.gen"
 
 # Live-reload proxy configuration (optional)
 # Format: <listen_port>:<target_port>
 proxy: "8080:8081"
 
+# Optional HTTP URL polled before broadcasting a browser reload.
+# Use this when your app needs time to complete startup tasks after the port
+# opens (e.g. database migrations, cache warming).
+# Falls back to TCP port polling when not set.
+# health_check: "http://localhost:8081/healthz"
+
 # Log level: debug, info, warn, error (optional, defaults to debug)
 log_level: info
 `
 
-// WriteExampleConfig writes an example configuration file
+// WriteExampleConfig writes an example configuration file.
 func WriteExampleConfig(path string) error {
 	return os.WriteFile(path, []byte(exampleConfig), 0644)
 }
@@ -148,8 +195,6 @@ func WriteExampleConfig(path string) error {
 const (
 	defaultDebounceDelay        = 100 * time.Millisecond
 	defaultReloadBroadcastDelay = 300 * time.Millisecond
-	defaultCrashThreshold       = 1 * time.Second
-	defaultMaxBackoff           = 10 * time.Second
 	defaultWatchExtensions      = ".go"
 	defaultRootPath             = "."
 )

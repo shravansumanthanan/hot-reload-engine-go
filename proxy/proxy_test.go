@@ -19,7 +19,7 @@ func TestProxyInjectsScript(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	p, err := New(":0", backend.URL)
+	p, err := New(":0", backend.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestProxySkipsNonHTML(t *testing.T) {
 		Body:       io.NopCloser(strings.NewReader(originalBody)),
 	}
 
-	p, _ := New(":0", "http://localhost:9999")
+	p, _ := New(":0", "http://localhost:9999", "")
 	err := p.modifyResponse(resp)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestProxySkipsNonHTML(t *testing.T) {
 }
 
 func TestProxySSEHandler(t *testing.T) {
-	p, err := New(":0", "http://localhost:9999")
+	p, err := New(":0", "http://localhost:9999", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestProxySSEHandler(t *testing.T) {
 }
 
 func TestProxyBroadcastWithNoClients(t *testing.T) {
-	p, err := New(":0", "http://localhost:9999")
+	p, err := New(":0", "http://localhost:9999", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestProxyBroadcastWithNoClients(t *testing.T) {
 }
 
 func TestProxyScriptInjectionPosition(t *testing.T) {
-	p, _ := New(":0", "http://localhost:9999")
+	p, _ := New(":0", "http://localhost:9999", "")
 
 	html := `<html><head><title>Test</title></head><body><p>Content</p></body></html>`
 	resp := &http.Response{
@@ -190,7 +190,7 @@ func TestProxyScriptInjectionPosition(t *testing.T) {
 }
 
 func TestProxyErrorHandler(t *testing.T) {
-	p, _ := New(":0", "http://localhost:9999")
+	p, _ := New(":0", "http://localhost:9999", "")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()

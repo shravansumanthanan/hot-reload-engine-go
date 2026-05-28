@@ -1,4 +1,7 @@
-package main
+// Package manager coordinates the build and run lifecycle of a watched project.
+// It serialises rebuild requests through a single-element channel so that
+// rapid file changes are coalesced — only the latest state is ever built.
+package manager
 
 import (
 	"context"
@@ -10,7 +13,33 @@ import (
 	"github.com/shravansumanthanan/hot-reload-engine-go/process"
 )
 
-// Manager coordinates the build and run cycles. It serializes rebuild
+// ProcessRunner is the interface for managing a long-running child process.
+// Using an interface here decouples Manager from the concrete *process.Runner
+// and allows mock implementations in tests.
+type ProcessRunner interface {
+	Run() error
+	Stop()
+	Wait() error
+}
+
+// LiveReloader is the interface for notifying browser clients to reload.
+// Decouples Manager from the concrete *proxy.Proxy.
+type LiveReloader interface {
+	BroadcastReload()
+	WaitForTarget(ctx context.Context) bool
+	Shutdown(ctx context.Context) error
+}
+
+const (
+	// defaultCrashThreshold is the minimum uptime required before a process
+	// exit is NOT considered a crash.
+	defaultCrashThreshold = 1 * time.Second
+
+	// defaultMaxBackoff is the maximum delay between crash-loop retries.
+	defaultMaxBackoff = 10 * time.Second
+)
+
+// Manager coordinates the build and run cycles. It serialises rebuild
 // requests through a single-element channel so that rapid file changes
 // are coalesced and only the latest state is built.
 type Manager struct {
@@ -19,7 +48,7 @@ type Manager struct {
 	liveProxy LiveReloader
 
 	buildCancel context.CancelFunc
-	runner      *process.Runner
+	runner      ProcessRunner
 
 	mu        sync.Mutex
 	triggerCh chan struct{}
@@ -104,9 +133,9 @@ func (m *Manager) runCycle() {
 
 	// Run build — blocks but is cancellable via context.
 	err := process.Build(buildCtx, m.buildCmd)
-	
+
 	m.mu.Lock()
-	// Clear the build cancel function after build completes or fails
+	// Clear the build cancel function after build completes or fails.
 	m.buildCancel = nil
 	m.mu.Unlock()
 
@@ -124,16 +153,16 @@ func (m *Manager) runCycle() {
 	}
 
 	// Start the new server process.
-	m.runner = process.NewRunner(m.execCmd)
-	err = m.runner.Run()
+	runner := process.NewRunner(m.execCmd)
+	err = runner.Run()
 	if err != nil {
 		slog.Error("Failed to start server", "err", err)
-		m.runner = nil
 		m.mu.Unlock()
 		return
 	}
+	m.runner = runner
 
-	// Reset crash count on successful start
+	// Reset crash count on successful start.
 	m.crashCount = 0
 
 	// Notify live-reload proxy clients once the target port is ready.
@@ -151,13 +180,13 @@ func (m *Manager) runCycle() {
 		}()
 	}
 
-	runnerRef := m.runner
+	runnerRef := runner
 	lastStart := time.Now()
 	m.mu.Unlock()
 
 	// Monitor the process for unexpected exits (crashes).
-	go func(runner *process.Runner, startTime time.Time) {
-		_ = runner.Wait()
+	go func(r ProcessRunner, startTime time.Time) {
+		_ = r.Wait()
 
 		// Check if the manager has been stopped before doing anything.
 		select {
@@ -170,8 +199,8 @@ func (m *Manager) runCycle() {
 		defer m.mu.Unlock()
 
 		// If this is still the active runner, it crashed or exited on its own.
-		// If m.runner != runner, it was stopped intentionally by runCycle.
-		if m.runner == runner {
+		// If m.runner != r, it was stopped intentionally by runCycle.
+		if m.runner == runnerRef {
 			m.runner = nil
 			slog.Warn("Process exited unexpectedly")
 

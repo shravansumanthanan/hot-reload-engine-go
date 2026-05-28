@@ -18,23 +18,29 @@ import (
 )
 
 type Proxy struct {
-	targetURL *url.URL
-	address   string
+	targetURL      *url.URL
+	address        string
+	healthCheckURL string // optional HTTP URL to probe instead of raw TCP dial
 
 	mu      sync.Mutex
 	clients map[chan struct{}]struct{}
 	server  *http.Server
 }
 
-func New(address, targetAddr string) (*Proxy, error) {
+// New creates a Proxy.
+// healthCheckURL is optional: when non-empty, WaitForTarget polls this URL
+// for a successful (non-5xx) HTTP response instead of a raw TCP dial.
+// Pass an empty string to use the default TCP-port polling behaviour.
+func New(address, targetAddr, healthCheckURL string) (*Proxy, error) {
 	u, err := url.Parse(targetAddr)
 	if err != nil {
 		return nil, err
 	}
 	return &Proxy{
-		targetURL: u,
-		address:   address,
-		clients:   make(map[chan struct{}]struct{}),
+		targetURL:      u,
+		address:        address,
+		healthCheckURL: healthCheckURL,
+		clients:        make(map[chan struct{}]struct{}),
 	}, nil
 }
 
@@ -78,10 +84,25 @@ func (p *Proxy) Shutdown(ctx context.Context) error {
 	return s.Shutdown(ctx)
 }
 
-// WaitForTarget polls the target address until it's accepting connections or
-// the context is cancelled. Returns true if the target became ready.
+// WaitForTarget waits until the target becomes ready or the context is cancelled.
+//
+// If a healthCheckURL was provided to New(), it performs an HTTP GET and waits
+// for a non-5xx response — this correctly handles apps that bind their port
+// before finishing startup (e.g. running DB migrations).
+//
+// When no healthCheckURL is set it falls back to a raw TCP dial, which is the
+// same behaviour as before and requires no extra configuration.
+//
+// Returns true if the target became ready within the context deadline.
 func (p *Proxy) WaitForTarget(ctx context.Context) bool {
-	host := p.targetURL.Host // e.g. "127.0.0.1:8081"
+	if p.healthCheckURL != "" {
+		return p.waitHTTP(ctx, p.healthCheckURL)
+	}
+	return p.waitTCP(ctx, p.targetURL.Host)
+}
+
+// waitTCP polls the target host:port via TCP until it accepts a connection.
+func (p *Proxy) waitTCP(ctx context.Context, host string) bool {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -92,7 +113,32 @@ func (p *Proxy) WaitForTarget(ctx context.Context) bool {
 		case <-ticker.C:
 			conn, err := net.DialTimeout("tcp", host, 100*time.Millisecond)
 			if err == nil {
-				conn.Close()
+				_ = conn.Close()
+				return true
+			}
+		}
+	}
+}
+
+// waitHTTP polls the given URL until it returns a non-5xx HTTP status or the
+// context is cancelled. A 200-4xx response is treated as "ready" because the
+// app is reachable and responding (4xx may be expected on the health endpoint).
+func (p *Proxy) waitHTTP(ctx context.Context, url string) bool {
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			resp, err := client.Get(url) //nolint:noctx // context propagated via outer select
+			if err != nil {
+				continue
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode < 500 {
 				return true
 			}
 		}

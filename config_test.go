@@ -170,3 +170,71 @@ func TestWriteExampleConfig(t *testing.T) {
 	}
 }
 
+func TestConfigValidate(t *testing.T) {
+	t.Run("valid empty config passes", func(t *testing.T) {
+		cfg := &Config{}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Expected no error for empty config, got: %v", err)
+		}
+	})
+
+	t.Run("valid proxy format passes", func(t *testing.T) {
+		cfg := &Config{Proxy: "8080:8081"}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid proxy format fails", func(t *testing.T) {
+		for _, bad := range []string{"8080", "abc:def", "8080:8081:extra", ":8081"} {
+			cfg := &Config{Proxy: bad}
+			if err := cfg.Validate(); err == nil {
+				t.Errorf("Expected error for proxy %q, got nil", bad)
+			}
+		}
+	})
+
+	t.Run("valid log levels pass", func(t *testing.T) {
+		for _, level := range []string{"debug", "info", "warn", "error"} {
+			cfg := &Config{LogLevel: level}
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("Unexpected error for log level %q: %v", level, err)
+			}
+		}
+	})
+
+	t.Run("invalid log level fails", func(t *testing.T) {
+		cfg := &Config{LogLevel: "verbose"}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Expected error for invalid log level, got nil")
+		}
+	})
+
+	t.Run("valid health_check URL passes", func(t *testing.T) {
+		cfg := &Config{HealthCheck: "http://localhost:8081/healthz"}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid health_check URL fails", func(t *testing.T) {
+		cfg := &Config{HealthCheck: "localhost:8081/healthz"}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Expected error for health_check without scheme, got nil")
+		}
+	})
+
+	t.Run("non-existent root fails", func(t *testing.T) {
+		cfg := &Config{Root: "/tmp/hotreload-nonexistent-dir-xyz"}
+		if err := cfg.Validate(); err == nil {
+			t.Error("Expected error for non-existent root, got nil")
+		}
+	})
+
+	t.Run("existing root passes", func(t *testing.T) {
+		cfg := &Config{Root: t.TempDir()}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Unexpected error for existing root: %v", err)
+		}
+	})
+}

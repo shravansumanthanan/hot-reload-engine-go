@@ -297,42 +297,25 @@ func TestWatcherCustomIgnores(t *testing.T) {
 func TestHotreloadIgnoreFile(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create a .hotreloadignore file
-	ignoreContent := `# Comment line
-custom_dir
-another_dir
-
-# Another comment
-third_dir
-`
+	// Create a .hotreloadignore file with exact names and a glob pattern.
+	ignoreContent := "# Comment line\ncustom_dir\nanother_dir\n\n# Another comment\nthird_dir\n"
 	ignoreFile := filepath.Join(dir, ".hotreloadignore")
 	if err := os.WriteFile(ignoreFile, []byte(ignoreContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create watcher - should load .hotreloadignore
+	// Create watcher — should load .hotreloadignore automatically.
 	w, err := New(dir, []string{".go"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer w.Close()
 
-	// Verify custom directories are ignored
-	if !w.ignores["custom_dir"] {
-		t.Error("Expected custom_dir to be ignored")
-	}
-	if !w.ignores["another_dir"] {
-		t.Error("Expected another_dir to be ignored")
-	}
-	if !w.ignores["third_dir"] {
-		t.Error("Expected third_dir to be ignored")
-	}
-
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create a custom ignored directory
+	// Create a directory matching a pattern in .hotreloadignore.
 	customDir := filepath.Join(dir, "custom_dir")
 	if err := os.Mkdir(customDir, 0755); err != nil {
 		t.Fatal(err)
@@ -340,17 +323,47 @@ third_dir
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Create a file inside the ignored directory
+	// Create a .go file inside the ignored directory — should NOT trigger an event.
 	ignoredFile := filepath.Join(customDir, "test.go")
 	if err := os.WriteFile(ignoredFile, []byte("package test"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Should NOT receive an event
 	select {
 	case event := <-w.Events:
 		t.Fatalf("Did not expect event for .hotreloadignore'd directory, got: %s", event)
 	case <-time.After(300 * time.Millisecond):
-		// Good - no event received
+		// Good — no event received.
+	}
+}
+
+func TestShouldIgnoreDirGlobPatterns(t *testing.T) {
+	dir := t.TempDir()
+
+	// Use a glob pattern that should match directories like "generated" by exact
+	// name and "internal/gen" by relative path.
+	w, err := New(dir, []string{".go"}, []string{"gen*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	tests := []struct {
+		baseName string
+		expect   bool // true = should be ignored
+	}{
+		{"generated", true},
+		{"gen", true},
+		{"gen_code", true},
+		{"vendor", false},   // not matching gen*
+		{"internal", false}, // not matching gen*
+	}
+
+	for _, tc := range tests {
+		absPath := filepath.Join(dir, tc.baseName)
+		got := w.shouldIgnoreDir(absPath, tc.baseName)
+		if got != tc.expect {
+			t.Errorf("shouldIgnoreDir(%q) = %v, want %v", tc.baseName, got, tc.expect)
+		}
 	}
 }

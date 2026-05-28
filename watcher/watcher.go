@@ -9,15 +9,15 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-var defaultIgnoredDirs = map[string]bool{
-	".git":         true,
-	"node_modules": true,
-	"bin":          true,
-	"build":        true,
-	"tmp":          true,
-	"dist":         true,
-	".idea":        true,
-	".vscode":      true,
+var defaultIgnoredDirs = []string{
+	".git",
+	"node_modules",
+	"bin",
+	"build",
+	"tmp",
+	"dist",
+	".idea",
+	".vscode",
 }
 
 // tempFileSuffixes are file suffixes created by editors during saves.
@@ -38,39 +38,39 @@ var tempFilePrefixes = []string{
 }
 
 type Watcher struct {
-	watcher *fsnotify.Watcher
-	root    string
-	Events  chan string
-	Errors  chan error
-	exts    []string
-	ignores map[string]bool
+	watcher        *fsnotify.Watcher
+	root           string
+	Events         chan string
+	Errors         chan error
+	exts           []string
+	ignorePatterns []string // glob patterns, matched via filepath.Match
 }
 
 // New creates a new recursive watcher.
+// ignores is a list of additional glob patterns to ignore (e.g. "vendor", "*.gen").
 func New(root string, exts []string, ignores []string) (*Watcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
-	ignMap := make(map[string]bool)
-	for k, v := range defaultIgnoredDirs {
-		ignMap[k] = v
-	}
+	// Start with the built-in defaults.
+	patterns := make([]string, len(defaultIgnoredDirs))
+	copy(patterns, defaultIgnoredDirs)
+
+	// Add CLI/config-supplied patterns.
 	for _, ign := range ignores {
-		if ign != "" {
-			ignMap[strings.TrimSpace(ign)] = true
+		if ign = strings.TrimSpace(ign); ign != "" {
+			patterns = append(patterns, ign)
 		}
 	}
 
-	// Load .hotreloadignore file if it exists
+	// Load .hotreloadignore file if it exists (supports glob patterns).
 	hotreloadIgnores, err := loadHotreloadIgnore(root)
 	if err != nil {
 		slog.Warn("Failed to load .hotreloadignore", "err", err)
 	} else {
-		for _, ign := range hotreloadIgnores {
-			ignMap[ign] = true
-		}
+		patterns = append(patterns, hotreloadIgnores...)
 	}
 
 	validExts := []string{}
@@ -81,12 +81,12 @@ func New(root string, exts []string, ignores []string) (*Watcher, error) {
 	}
 
 	return &Watcher{
-		watcher: w,
-		root:    root,
-		Events:  make(chan string, 100),
-		Errors:  make(chan error, 10),
-		exts:    validExts,
-		ignores: ignMap,
+		watcher:        w,
+		root:           root,
+		Events:         make(chan string, 100),
+		Errors:         make(chan error, 10),
+		exts:           validExts,
+		ignorePatterns: patterns,
 	}, nil
 }
 
@@ -132,18 +132,35 @@ func (w *Watcher) watchRecursive(dir string) error {
 }
 
 // shouldIgnoreDir returns true if a directory should be skipped.
-// It checks both the directory's base name and its path relative to the
-// watch root, so both simple patterns ("vendor") and path-based patterns
-// ("internal/generated") are supported.
+//
+// Each pattern in ignorePatterns is tested against:
+//  1. The directory's base name  (e.g. "node_modules")
+//  2. The path relative to the watch root (e.g. "internal/generated")
+//
+// Patterns are evaluated using filepath.Match, so standard shell globs
+// (*, ?, [abc]) work correctly. Patterns ending with "/" are also matched
+// by stripping the trailing slash before comparison.
 func (w *Watcher) shouldIgnoreDir(absPath, baseName string) bool {
-	// Check by base name (most common case: "node_modules", "vendor", etc.)
-	if w.ignores[baseName] {
-		return true
-	}
-	// Check by path relative to the watch root (e.g. "internal/generated")
-	relPath, err := filepath.Rel(w.root, absPath)
-	if err == nil && w.ignores[relPath] {
-		return true
+	relPath, relErr := filepath.Rel(w.root, absPath)
+
+	for _, pattern := range w.ignorePatterns {
+		// Normalise: remove trailing slash so "bin/" matches base "bin".
+		p := strings.TrimSuffix(pattern, "/")
+		if p == "" {
+			continue
+		}
+
+		// Match against base name (most common: "vendor", "node_modules").
+		if matched, _ := filepath.Match(p, baseName); matched {
+			return true
+		}
+
+		// Match against relative path (e.g. "internal/generated").
+		if relErr == nil {
+			if matched, _ := filepath.Match(p, relPath); matched {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -225,7 +242,9 @@ func isTempFile(path string) bool {
 	return false
 }
 
-// loadHotreloadIgnore reads the .hotreloadignore file and returns a list of patterns to ignore
+// loadHotreloadIgnore reads the .hotreloadignore file and returns a list of
+// glob patterns to ignore. Empty lines and lines beginning with '#' are
+// treated as comments and skipped.
 func loadHotreloadIgnore(root string) ([]string, error) {
 	ignorePath := filepath.Join(root, ".hotreloadignore")
 	data, err := os.ReadFile(ignorePath)

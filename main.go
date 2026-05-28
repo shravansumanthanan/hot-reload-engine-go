@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shravansumanthanan/hot-reload-engine-go/debouncer"
+	"github.com/shravansumanthanan/hot-reload-engine-go/internal/manager"
 	"github.com/shravansumanthanan/hot-reload-engine-go/proxy"
 	"github.com/shravansumanthanan/hot-reload-engine-go/watcher"
 )
@@ -58,16 +59,20 @@ func main() {
 		return
 	}
 
-	// Load configuration file if it exists
+	// Load configuration file if it exists.
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config file: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Merge config file with CLI flags (CLI flags take precedence)
+	// Merge config file with CLI flags (CLI flags take precedence).
 	if cfg != nil {
 		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel, explicitFlags)
+		if err := cfg.Validate(); err != nil {
+			fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if *buildCommand == "" || *execCommand == "" {
@@ -99,11 +104,11 @@ func main() {
 
 	slog.Info("Starting hotreload", "root", *rootPath, "build", *buildCommand, "exec", *execCommand)
 
-	// Context for graceful shutdown of hotreload itself
+	// Context for graceful shutdown of hotreload itself.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle SIGINT/SIGTERM
+	// Handle SIGINT/SIGTERM.
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -112,7 +117,7 @@ func main() {
 		cancel()
 	}()
 
-	// Start File Watcher
+	// Start File Watcher.
 	exts := strings.Split(*extFlag, ",")
 	ignores := strings.Split(*ignoreFlag, ",")
 	w, err := watcher.New(*rootPath, exts, ignores)
@@ -126,6 +131,7 @@ func main() {
 	}
 	defer w.Close()
 
+	// Start optional live-reload proxy.
 	var liveProxy *proxy.Proxy
 	if *proxyFlag != "" {
 		parts := strings.SplitN(*proxyFlag, ":", 2)
@@ -135,8 +141,15 @@ func main() {
 		}
 		address := ":" + parts[0]
 		targetAddr := "http://127.0.0.1:" + parts[1]
+
+		// Use health_check URL from config if provided, otherwise TCP polling.
+		healthCheckURL := ""
+		if cfg != nil {
+			healthCheckURL = cfg.HealthCheck
+		}
+
 		var proxyErr error
-		liveProxy, proxyErr = proxy.New(address, targetAddr)
+		liveProxy, proxyErr = proxy.New(address, targetAddr, healthCheckURL)
 		if proxyErr != nil {
 			slog.Error("Failed to initialize proxy", "err", proxyErr)
 			os.Exit(1)
@@ -155,8 +168,8 @@ func main() {
 		}()
 	}
 
-	// Manager handles build/exec coordination
-	m := NewManager(*buildCommand, *execCommand, liveProxy)
+	// Manager handles build/exec coordination.
+	m := manager.NewManager(*buildCommand, *execCommand, liveProxy)
 	defer m.Stop()
 
 	// Setup Debouncer for file events before triggering the initial build.
