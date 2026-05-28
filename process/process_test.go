@@ -46,7 +46,7 @@ func TestRunnerStartStop(t *testing.T) {
 	// If Wait doesn't hang, it means it died
 	done := make(chan struct{})
 	go func() {
-		runner.Wait()
+		_ = runner.Wait()
 		close(done)
 	}()
 

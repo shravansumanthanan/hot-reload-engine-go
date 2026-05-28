@@ -15,7 +15,7 @@ func TestProxyInjectsScript(t *testing.T) {
 	// Create a backend server that returns HTML
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(`<html><body><h1>Hello</h1></body></html>`))
+		_, _ = w.Write([]byte(`<html><body><h1>Hello</h1></body></html>`))
 	}))
 	defer backend.Close()
 
