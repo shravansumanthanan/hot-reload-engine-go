@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"log/slog"
+	"math/rand"
 	"sync"
 	"time"
 
-	"hotreload/process"
-	"hotreload/proxy"
+	"github.com/shravansumanthanan/hot-reload-engine-go/process"
 )
 
 // Manager coordinates the build and run cycles. It serializes rebuild
@@ -16,7 +16,7 @@ import (
 type Manager struct {
 	buildCmd  string
 	execCmd   string
-	liveProxy *proxy.Proxy
+	liveProxy LiveReloader
 
 	buildCancel context.CancelFunc
 	runner      *process.Runner
@@ -29,7 +29,7 @@ type Manager struct {
 }
 
 // NewManager creates a Manager and starts its background loop.
-func NewManager(buildCmd, execCmd string, liveProxy *proxy.Proxy) *Manager {
+func NewManager(buildCmd, execCmd string, liveProxy LiveReloader) *Manager {
 	m := &Manager{
 		buildCmd:  buildCmd,
 		execCmd:   execCmd,
@@ -136,12 +136,18 @@ func (m *Manager) runCycle() {
 	// Reset crash count on successful start
 	m.crashCount = 0
 
-	// Notify live-reload proxy clients after a short delay to let the
-	// server finish binding its port.
+	// Notify live-reload proxy clients once the target port is ready.
+	// We wait up to 10s for the server to bind its port rather than
+	// using a fixed sleep, which prevents premature browser refreshes.
 	if m.liveProxy != nil {
 		go func() {
-			time.Sleep(defaultReloadBroadcastDelay)
-			m.liveProxy.BroadcastReload()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if m.liveProxy.WaitForTarget(ctx) {
+				m.liveProxy.BroadcastReload()
+			} else {
+				slog.Warn("Target did not become ready within 10s, skipping reload broadcast")
+			}
 		}()
 	}
 
@@ -153,6 +159,13 @@ func (m *Manager) runCycle() {
 	go func(runner *process.Runner, startTime time.Time) {
 		_ = runner.Wait()
 
+		// Check if the manager has been stopped before doing anything.
+		select {
+		case <-m.stopCh:
+			return
+		default:
+		}
+
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
@@ -163,21 +176,36 @@ func (m *Manager) runCycle() {
 			slog.Warn("Process exited unexpectedly")
 
 			// Crash loop protection: if the process dies very quickly,
-			// back off before retrying to avoid a tight restart loop.
+			// apply exponential backoff with jitter before retrying.
 			duration := time.Since(startTime)
 			if duration < defaultCrashThreshold {
 				m.crashCount++
-				backoff := time.Duration(m.crashCount) * time.Second
-				if backoff > defaultMaxBackoff {
-					backoff = defaultMaxBackoff
+
+				// Exponential backoff: 2^(crashCount-1) * 500ms, capped at max.
+				base := time.Duration(1<<uint(m.crashCount-1)) * 500 * time.Millisecond
+				if base > defaultMaxBackoff {
+					base = defaultMaxBackoff
 				}
-				slog.Warn("Rapid crash detected, backing off", "wait", backoff, "crashes", m.crashCount)
+				// Add jitter: up to 500ms of random delay.
+				jitter := time.Duration(rand.Int63n(int64(500 * time.Millisecond)))
+				backoff := base + jitter
+
+				slog.Warn("Rapid crash detected, backing off",
+					"wait", backoff.Round(time.Millisecond),
+					"crashes", m.crashCount,
+				)
 
 				go func(wait time.Duration) {
-					time.Sleep(wait)
+					timer := time.NewTimer(wait)
+					defer timer.Stop()
 					select {
-					case m.triggerCh <- struct{}{}:
-					default:
+					case <-timer.C:
+						select {
+						case m.triggerCh <- struct{}{}:
+						default:
+						}
+					case <-m.stopCh:
+						// Manager stopped — do not re-trigger.
 					}
 				}(backoff)
 			} else {

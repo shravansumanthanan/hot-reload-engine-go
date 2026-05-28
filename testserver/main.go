@@ -15,11 +15,11 @@ func main() {
 	crashMode := flag.Bool("crash-mode", false, "Crash immediately to test loop protection")
 	flag.Parse()
 
-	if *crashMode {
-		log.Println("CRASH MODE: Simulating rapid failure")
-		time.Sleep(100 * time.Millisecond) // Small delay before crash
-		os.Exit(1)
-	}
+	    if *crashMode {
+        log.Println("CRASH MODE: Simulating rapid failure")
+        time.Sleep(100 * time.Millisecond) // Small delay before crash
+        os.Exit(1)
+    }
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -29,7 +29,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintln(w, "<html><body><h1>I am testing this!</h1></body></html>")
+		fmt.Fprintln(w, "<html><body><h1>New Tester is here</h1></body></html>")
 	})
 
 	server := &http.Server{

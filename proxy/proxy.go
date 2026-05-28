@@ -3,9 +3,11 @@ package proxy
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -20,7 +22,8 @@ type Proxy struct {
 	address   string
 
 	mu      sync.Mutex
-	clients map[chan bool]bool
+	clients map[chan struct{}]struct{}
+	server  *http.Server
 }
 
 func New(address, targetAddr string) (*Proxy, error) {
@@ -31,7 +34,7 @@ func New(address, targetAddr string) (*Proxy, error) {
 	return &Proxy{
 		targetURL: u,
 		address:   address,
-		clients:   make(map[chan bool]bool),
+		clients:   make(map[chan struct{}]struct{}),
 	}, nil
 }
 
@@ -50,8 +53,50 @@ func (p *Proxy) Start() error {
 		Addr:              p.address,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      0, // 0 = no timeout for SSE long-poll connections
+		IdleTimeout:       120 * time.Second,
 	}
+
+	p.mu.Lock()
+	p.server = server
+	p.mu.Unlock()
+
 	return server.ListenAndServe()
+}
+
+// Shutdown gracefully shuts down the proxy server, closing all SSE connections.
+func (p *Proxy) Shutdown(ctx context.Context) error {
+	p.mu.Lock()
+	s := p.server
+	p.mu.Unlock()
+
+	if s == nil {
+		return nil
+	}
+	slog.Info("Shutting down proxy server")
+	return s.Shutdown(ctx)
+}
+
+// WaitForTarget polls the target address until it's accepting connections or
+// the context is cancelled. Returns true if the target became ready.
+func (p *Proxy) WaitForTarget(ctx context.Context) bool {
+	host := p.targetURL.Host // e.g. "127.0.0.1:8081"
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			conn, err := net.DialTimeout("tcp", host, 100*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				return true
+			}
+		}
+	}
 }
 
 // errorHandler serves a friendly auto-retry page when the backend is
@@ -69,7 +114,7 @@ func (p *Proxy) BroadcastReload() {
 	defer p.mu.Unlock()
 	for c := range p.clients {
 		select {
-		case c <- true:
+		case c <- struct{}{}:
 		default:
 		}
 	}
@@ -79,7 +124,14 @@ func (p *Proxy) sseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Restrict CORS to the proxy's own localhost address instead of wildcard.
+	// Since the injected script is served by the proxy itself this is same-origin,
+	// but an explicit restriction prevents other tabs from subscribing.
+	origin := "http://localhost"
+	if strings.HasPrefix(p.address, ":") {
+		origin = "http://localhost" + p.address
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -87,9 +139,9 @@ func (p *Proxy) sseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ch := make(chan bool, 1)
+	ch := make(chan struct{}, 1)
 	p.mu.Lock()
-	p.clients[ch] = true
+	p.clients[ch] = struct{}{}
 	p.mu.Unlock()
 
 	defer func() {
@@ -104,11 +156,14 @@ func (p *Proxy) sseHandler(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			// Client disconnected.
 			return
 		case <-ch:
 			fmt.Fprintf(w, "data: reload\n\n")
 			flusher.Flush()
-			return
+			// Re-arm the channel so the next reload can be received.
+			// The channel is buffered (size 1), so we just drain it and
+			// keep looping — the connection stays open for future reloads.
 		}
 	}
 }

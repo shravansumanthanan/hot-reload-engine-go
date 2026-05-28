@@ -13,6 +13,10 @@ const (
 	// gracefulShutdownTimeout is how long to wait for a process to exit
 	// before sending SIGKILL.
 	gracefulShutdownTimeout = 500 * time.Millisecond
+
+	// buildKillTimeout is how long to wait for a cancelled build process
+	// to exit after receiving SIGKILL.
+	buildKillTimeout = 1 * time.Second
 )
 
 // Runner manages a long-running process like a server.
@@ -49,6 +53,10 @@ func (r *Runner) Run() error {
 		slog.Error("Failed to start process", "err", err)
 		return err
 	}
+
+	// Structured audit entry — useful for correlating logs when multiple
+	// processes are started across the lifecycle of hotreload.
+	slog.Info("Process started", "cmd", r.cmdStr, "pid", r.cmd.Process.Pid)
 
 	go func() {
 		r.err = r.cmd.Wait()
@@ -139,7 +147,7 @@ func Build(ctx context.Context, cmdStr string) error {
 		select {
 		case <-done:
 			// Process exited
-		case <-time.After(1 * time.Second):
+		case <-time.After(buildKillTimeout):
 			// Timeout waiting for process to die
 		}
 		err = ctx.Err()

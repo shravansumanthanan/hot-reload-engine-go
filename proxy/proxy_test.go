@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,37 +79,55 @@ func TestProxySSEHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Test SSE endpoint
-	req := httptest.NewRequest("GET", "/__hotreload_sse", nil)
+	// Use a cancellable context so we can simulate client disconnect.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/__hotreload_sse", nil).WithContext(ctx)
 	w := httptest.NewRecorder()
 
-	// Run SSE handler in background — it blocks until reload or client disconnect
+	// Run SSE handler in background — it blocks until client disconnects.
 	done := make(chan struct{})
 	go func() {
 		p.sseHandler(w, req)
 		close(done)
 	}()
 
-	// Give handler time to register and send initial message
-	time.Sleep(100 * time.Millisecond)
+	// Give the handler time to register and send the initial "connected" message.
+	time.Sleep(50 * time.Millisecond)
 
-	// Verify a client was registered
+	// Verify a client was registered.
 	p.mu.Lock()
 	clientCount := len(p.clients)
 	p.mu.Unlock()
-
 	if clientCount != 1 {
 		t.Fatalf("Expected 1 SSE client, got %d", clientCount)
 	}
 
-	// Broadcast reload — should cause handler to return
+	// Broadcast a reload — the handler should send the event but stay open.
 	p.BroadcastReload()
+	time.Sleep(50 * time.Millisecond)
+
+	// Connection must still be alive (handler should NOT have returned yet).
+	select {
+	case <-done:
+		t.Fatal("SSE handler returned prematurely after broadcast — connection should stay open")
+	default:
+		// Good: handler is still running.
+	}
+
+	// Broadcast a second reload to confirm the connection handles multiple events.
+	p.BroadcastReload()
+	time.Sleep(50 * time.Millisecond)
+
+	// Now simulate client disconnect by cancelling the context.
+	cancel()
 
 	select {
 	case <-done:
-		// Handler returned as expected
+		// Handler exited cleanly after client disconnect.
 	case <-time.After(2 * time.Second):
-		t.Fatal("SSE handler did not return after broadcast")
+		t.Fatal("SSE handler did not exit after client disconnect")
 	}
 
 	body := w.Body.String()
@@ -117,6 +136,14 @@ func TestProxySSEHandler(t *testing.T) {
 	}
 	if !strings.Contains(body, "data: reload") {
 		t.Error("Expected 'data: reload' in SSE stream")
+	}
+
+	// Verify client was cleaned up after disconnect.
+	p.mu.Lock()
+	clientCount = len(p.clients)
+	p.mu.Unlock()
+	if clientCount != 0 {
+		t.Errorf("Expected 0 SSE clients after disconnect, got %d", clientCount)
 	}
 }
 

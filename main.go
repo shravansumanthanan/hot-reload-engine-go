@@ -11,10 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"hotreload/debouncer"
-	"hotreload/proxy"
-	"hotreload/watcher"
+	"github.com/shravansumanthanan/hot-reload-engine-go/debouncer"
+	"github.com/shravansumanthanan/hot-reload-engine-go/proxy"
+	"github.com/shravansumanthanan/hot-reload-engine-go/watcher"
 )
+
+// version is injected at build time via -ldflags "-X main.version=x.y.z".
+var version = "dev"
 
 func main() {
 	rootPath := flag.String("root", defaultRootPath, "Project root directory to watch")
@@ -26,8 +29,23 @@ func main() {
 	logLevel := flag.String("log-level", "debug", "Log level: debug, info, warn, error")
 	configPath := flag.String("config", ".hotreload.yaml", "Path to configuration file")
 	initConfig := flag.Bool("init", false, "Generate example .hotreload.yaml configuration file")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 
 	flag.Parse()
+
+	// Collect the set of flags that were explicitly set by the user.
+	// This is the correct way to distinguish "user passed --root ." from
+	// "user didn't pass --root at all and it stayed at the default".
+	explicitFlags := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		explicitFlags[f.Name] = true
+	})
+
+	// Handle --version flag
+	if *showVersion {
+		fmt.Printf("hotreload version %s\n", version)
+		return
+	}
 
 	// Handle --init flag to generate example config
 	if *initConfig {
@@ -49,7 +67,7 @@ func main() {
 
 	// Merge config file with CLI flags (CLI flags take precedence)
 	if cfg != nil {
-		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel)
+		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel, explicitFlags)
 	}
 
 	if *buildCommand == "" || *execCommand == "" {
@@ -111,41 +129,49 @@ func main() {
 	var liveProxy *proxy.Proxy
 	if *proxyFlag != "" {
 		parts := strings.SplitN(*proxyFlag, ":", 2)
-		if len(parts) == 2 {
-			address := ":" + parts[0]
-			targetAddr := "http://127.0.0.1:" + parts[1]
-			var err error
-			liveProxy, err = proxy.New(address, targetAddr)
-			if err != nil {
-				slog.Error("Failed to initialize proxy", "err", err)
-			} else {
-				go func() {
-					if err := liveProxy.Start(); err != nil {
-						slog.Error("Proxy server failed", "err", err)
-					}
-				}()
-			}
+		if len(parts) != 2 {
+			slog.Error("Invalid proxy format, expected <listen_port>:<target_port>", "value", *proxyFlag)
+			os.Exit(1)
 		}
+		address := ":" + parts[0]
+		targetAddr := "http://127.0.0.1:" + parts[1]
+		var proxyErr error
+		liveProxy, proxyErr = proxy.New(address, targetAddr)
+		if proxyErr != nil {
+			slog.Error("Failed to initialize proxy", "err", proxyErr)
+			os.Exit(1)
+		}
+		go func() {
+			if err := liveProxy.Start(); err != nil {
+				slog.Error("Proxy server stopped", "err", err)
+			}
+		}()
+		defer func() {
+			shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer shutCancel()
+			if err := liveProxy.Shutdown(shutCtx); err != nil {
+				slog.Warn("Proxy shutdown error", "err", err)
+			}
+		}()
 	}
 
 	// Manager handles build/exec coordination
 	m := NewManager(*buildCommand, *execCommand, liveProxy)
 	defer m.Stop()
 
-	// Initial trigger with timeout to prevent hanging on first build
-	slog.Info("Triggering initial build")
-	m.TriggerBuild()
-
-	// Give the initial build some time to complete
-	// If it hangs, the user can still Ctrl+C to exit
-	time.Sleep(100 * time.Millisecond)
-
-	// Setup Debouncer for file events
+	// Setup Debouncer for file events before triggering the initial build.
+	// This ensures no file-change events are missed during the first build.
 	db := debouncer.New(defaultDebounceDelay, func() {
 		slog.Info("Changes detected, scheduling rebuild")
 		m.TriggerBuild()
 	})
 	defer db.Stop()
+
+	// Trigger the initial build. The manager loop runs in a background
+	// goroutine, so this returns immediately and the event loop below
+	// starts processing file changes right away.
+	slog.Info("Triggering initial build")
+	m.TriggerBuild()
 
 	// Event loop
 	for {

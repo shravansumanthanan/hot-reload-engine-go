@@ -1,220 +1,200 @@
 # 🔥 Hotreload CLI
 
-A robust and high-performing Command Line Interface (CLI) tool written in Go that watches a specified project directory for file changes and automatically rebuilds and restarts a server process. Designed to dramatically accelerate the development feedback loop.
+> A high-performance, cross-platform CLI tool in Go that watches your project files, automatically rebuilds and restarts your application, and injects a real-time live-reload script into your web browser.
 
-## 📦 Technologies
+[![CI Status](https://github.com/shravansumanthanan/hot-reload-engine-go/actions/workflows/ci.yml/badge.svg)](https://github.com/shravansumanthanan/hot-reload-engine-go/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/shravansumanthanan/hot-reload-engine-go)](https://github.com/shravansumanthanan/hot-reload-engine-go)
+[![Release Version](https://img.shields.io/github/v/release/shravansumanthanan/hot-reload-engine-go)](https://github.com/shravansumanthanan/hot-reload-engine-go/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-- Go (Golang) 1.21+
-- `fsnotify` (for cross-platform file system notifications)
-- Go standard library (`os/exec`, `syscall`, channels for concurrency)
-- `make` (for running demos)
+---
 
-## 🦄 Features
+## Why This Exists
 
-Here's what `hotreload` offers to improve your developer experience:
+During local development, manually stopping your server, compiling your changes, and refreshing your browser is a friction-filled flow. Typical file watchers often fail in key areas:
+- **Orphaned Processes:** They kill the main process but leave child processes running, causing "address already in use" errors on the next build.
+- **Resource Exhaustion:** Rapidly saving files causes a storm of concurrent, overlapping compiles that freeze the CPU.
+- **Crash Loops:** If the app has an initialization bug, the watcher restarts it continuously in an infinite crash loop, spiking machine temperatures.
 
-- **Instant Restart:** Triggers a build and start immediately upon file changes.
-- **Graceful Termination:** Uses process group killing (`SIGTERM` -> `SIGKILL`) to cleanly terminate running servers, including any child processes.
-- **Debouncing:** Coalesces rapid editor saves into a single build to avoid unnecessary rebuilds.
-- **Build Interruption:** If a file changes while a build is in progress, the current build is immediately cancelled and restarted.
-- **Smart Watching:** Dynamically watches new directories and skips typical ignored directories (`.git`, `node_modules`, `build`, temporary editor files, etc.).
-- **Crash Loop Protection:** Detects if your server crashes repeatedly within a 1-second interval and applies a backoff to prevent a rapid, resource-intensive restart loop.
-- **Real-time Logging:** Streams server logs directly to your terminal without buffering.
-- **Live Proxy:** An optional live-reload HTTP proxy is included.
+`hotreload` is designed specifically to solve these operational pain points. It guarantees complete process group teardown, provides race-free build cancellation, coalesces rapid events, and protects system resources with a jittered exponential backoff crash-monitor.
 
-## 👩🏽‍🍳 The Process
+---
 
-I built this tool to solve the common pain point of manually stopping, rebuilding, and restarting servers during backend development. My primary goal was to make it extremely fast, reliable, and not leak processes.
+## How It Works (Architecture)
 
-First, I set up the `fsnotify` file watcher to recursively monitor the project root while intelligently skipping ignored folders like `.git` and `node_modules`. I used Go's channels to funnel these file system events into a central manager.
+```mermaid
+graph TD
+    A[File System Events] -->|fsnotify| B[Watcher]
+    B -->|File Path| C[Debouncer]
+    C -->|Coalesced Event| D[Manager]
+    D -->|Build Cancel Signal| E[Builder]
+    D -->|SIGTERM / SIGKILL| F[Process Runner]
+    D -->|Reload Broadcast| G[Live-Reload Proxy]
+    G -->|Injects SSE Script| H[Browser Clients]
+```
 
-Next, I implemented the debouncer. Using Go timers, I ensured that rapid, successive "save" events from code editors are coalesced into a single trigger, preventing multiple parallel builds.
+1. **Watcher:** Monitor directories recursively using OS-native events, ignoring editor swap files and dependencies.
+2. **Debouncer:** Coalesce rapid, consecutive file saves into a single build trigger.
+3. **Manager:** Oversee the build and runner loops. When a new trigger arrives during a build, the active compile is cancelled immediately.
+4. **Runner:** Launch the application in its own process group. It uses platform-specific system calls to guarantee that child processes are completely torn down before any rebuild.
+5. **Proxy:** Inject an SSE (Server-Sent Events) live-reload script into HTML content, proxying standard requests to the application and automatically refreshing open browser tabs when a rebuild completes.
 
-The most complex part was process management. I had to ensure that when a restart is triggered, the existing process and any of its child processes are completely killed. I utilized process groups and Unix execution attributes (`syscall.Kill`) to achieve clean teardowns without orphaned processes. Finally, I implemented crash loop protection to handle cases where the user's code inherently fails on boot.
+---
 
-## 📚 What I Learned
+## Quick Start
 
-During this project, I deepened my knowledge of Go, especially regarding concurrency and system-level operations.
+You can get `hotreload` running on your local machine in under a minute.
 
-- **Advanced Process Management:**
-  - Learned how to manage process groups (PGID) in Unix-like systems via Go's `os/exec` and `syscall` packages to prevent zombie and orphan processes.
-- **Concurrency & Channels:**
-  - Mastered the use of Goroutines, Channels, and Timers (`time.After`, `select` statements) to build a robust, thread-safe event debouncer and build interrupter.
-- **File System Monitoring:**
-  - Integrated `fsnotify` and handled the nuances of cross-platform file system notifications, directory traversal, and dynamic path watching.
+### 1. Install
 
-## 📈 Overall Growth
-
-Building the `hotreload` CLI significantly boosted my confidence in systems programming with Go. Creating a developer tool requires strict attention to resource leaks, edge cases (like crashing code or rapid consecutive saves), and concurrency. I moved beyond standard web servers to master low-level OS interactions.
-
-## 💭 How can it be improved?
-
-- **Websocket Reloading:** Inject a script into HTML templates to automatically refresh the browser upon a successful backend restart (the live-reload proxy already supports this via SSE).
-- **Pattern Matching:** Support glob patterns in `.hotreloadignore` for more flexible ignore rules.
-- **Build Caching:** Detect when dependencies haven't changed and skip unnecessary rebuilds.
-
-## 🚦 Running the Project & Feature Testing
-
-To run `hotreload` in your local environment and see its features in action, follow these step-by-step instructions. We have provided a `testserver` and `Makefile` to make testing easy.
-
-### 1. Setup & Starting the Demo
-
-1. Clone the repository and navigate to the project directory:
-   ```bash
-   git clone https://github.com/shravansumanthanan/hot-reload-engine-go.git
-   cd hot-reload-engine-go
-   ```
-
-2. **Option A:** Use configuration file (recommended):
-   ```bash
-   # Generate example configuration file
-   go build -o hotreload .
-   ./hotreload --init
-   
-   # Edit .hotreload.yaml with your settings
-   # Then run:
-   ./hotreload
-   ```
-
-3. **Option B:** Use the provided Makefile:
-   ```bash
-   make demo
-   ```
-   *This command builds the CLI, attaches to the `testserver` directory, and sets up an optional live proxy. You will see the server start up and state that it is listening.*
-
-4. **Option C:** Use CLI flags directly:
-   ```bash
-   ./hotreload --root ./your-project \
-               --build "go build -o ./bin/server ." \
-               --exec "./bin/server"
-   ```
-
-### 2. Testing the Features
-
-While `make demo` is running, try the following tests to understand how `hotreload` handles different development scenarios:
-
-**⚡️ Instant Restart & Real-time Logging**
-- Open `./testserver/main.go` in your favorite editor.
-- Modify a response message or add a new log: `fmt.Println("Hello Hotreload!")`.
-- **Save the file.**
-- **Observe:** The terminal will instantly log that file changes were detected, the old process is terminated, and the new server process logs your new message. The logs are streamed in real-time.
-
-**🛑 Graceful Termination**
-- **Observe:** When you save a file and a restart is triggered, `hotreload` uses process group killing (`SIGTERM` followed by `SIGKILL` if necessary) to ensure the server and any of its children are cleanly gracefully torn down without creating orphaned/zombie processes.
-
-**⏱️ Debouncing**
-- Open `./testserver/main.go`.
-- Rapidly hit **Save** (e.g., `Ctrl+S` or `Cmd+S`) 5-10 times within a single second.
-- **Observe:** `hotreload` will not trigger 10 separate builds. It intelligently coalesces these rapid editor events and only triggers **one** build after the saving frenzy stops.
-
-**💥 Build Interruption**
-- Introduce a syntax error in `./testserver/main.go` (e.g., type `func main() { oops }`) and save it.
-- **Observe:** The build fails, and `hotreload` reports the error and waits for the next change.
-- Now, remove the syntax error and save. Then, *very quickly* save again before the build finishes.
-- **Observe:** `hotreload` cancels the first in-progress build and immediately starts a new one, ensuring you are never waiting for an outdated or interrupted build to complete.
-
-**🧠 Smart Watching**
-- Create a new directory named `node_modules` or `build` inside the project root.
-- Add or modify a file inside that directory.
-- **Observe:** `hotreload` completely ignores these changes, preventing unnecessary rebuilds from dependency downloads, standard build outputs, or `.git` operations.
-
-**🔁 Crash Loop Protection**
-- Stop the current `make demo` process (`Ctrl+C`).
-- Start the crash demo:
-  ```bash
-  make demo-crash
-  ```
-- **Observe:** The `testserver` is now configured to immediately panic and crash upon startup (simulating broken initialization code).
-- `hotreload` detects that the server crashed rapidly (under 1 second). Instead of infinitely restarting and burning CPU cycles in a crash loop, it halts the execution, logs the error, and waits for you to fix the code and save before trying to build and restart again.
-
-### 3. Manual Usage
-
-If you want to run it on your own projects without the demo `Makefile`, you can build the CLI and run it manually:
-
-**Using configuration file (recommended):**
 ```bash
-go build -o hotreload .
-./hotreload --init  # Creates .hotreload.yaml
-# Edit .hotreload.yaml with your project settings
-./hotreload
+go install github.com/shravansumanthanan/hot-reload-engine-go@latest
 ```
 
-**Using CLI flags:**
+### 2. Configure Your Project
+
+Initialize a configuration file in your project's root:
+
 ```bash
-go build -o hotreload .
-./hotreload --root ./your-project \
-            --build "go build -o ./bin/server ./your-project/main.go" \
-            --exec "./bin/server"
+hotreload --init
 ```
 
-**Custom ignore patterns:**
-Create a `.hotreloadignore` file in your project root:
-```
-# .hotreloadignore
-vendor
-generated
-docs
-testdata
-```
+This creates a `.hotreload.yaml` file. Edit it to specify your build and run commands:
 
-### 4. Configuration Options
-
-**Configuration File (.hotreload.yaml):**
 ```yaml
 root: .
-build: "go build -o ./bin/server ."
+build: "go build -o ./bin/server main.go"
 exec: "./bin/server"
 extensions:
   - .go
-  - .mod
+  - .yaml
 ignore:
-  - vendor
   - tmp
+  - vendor
 proxy: "8080:8081"
-log_level: info
 ```
 
-**CLI Flags (override config file):**
-- `--root` - Project root directory to watch
-- `--build` - Command to build the project
-- `--exec` - Command to execute the built binary
-- `--ext` - Comma-separated file extensions to watch
-- `--ignore` - Comma-separated directories to ignore
-- `--proxy` - Live-reload proxy (format: listen_port:target_port)
-- `--log-level` - Log level (debug, info, warn, error)
-- `--config` - Path to config file (default: .hotreload.yaml)
-- `--init` - Generate example configuration file
+### 3. Run
 
-### 4. Video
-(uploading soon)
+```bash
+hotreload
+```
 
-## 🔧 Recent Improvements
+---
 
-This project has been significantly improved with the following fixes and features:
+## Features
 
-**Concurrency & Reliability:**
-- Fixed all race conditions detected by Go's race detector
-- Added proper mutex protection for shared state
-- Fixed goroutine leaks in debouncer and process management
-- Implemented clean shutdown with proper resource cleanup
-- Fixed crash count reset logic for better error recovery
+- **⚡ Instant Interruption:** If you save a file while a build is running, `hotreload` immediately cancels the ongoing compiler process and schedules a fresh build.
+- **🛑 Zero Zombie Processes:** Restarts terminate the entire process group (PGID) using graceful `SIGTERM` followed by a `SIGKILL` timeout. On Windows, it handles process tree cleanup via `taskkill`.
+- **⏱️ Timed Debouncing:** File saves within `100ms` of each other are coalesced into a single rebuild event to prevent unnecessary CPU usage.
+- **💥 Crash Loop Backoff:** If your app panics or crashes instantly on boot, `hotreload` uses exponential backoff with jitter to delay restarts, protecting your CPU.
+- **🌐 Live-Reload Proxy:** Serves as a transparent reverse proxy that injects a light SSE script into your HTML responses, reloading your browser page whenever a backend build succeeds.
+- **📁 Dynamic Directory Watching:** Automatically detects newly created folders during runtime and registers them with the watcher.
 
-**Cross-Platform Support:**
-- Improved Windows process group management with `CREATE_NEW_PROCESS_GROUP`
-- Proper graceful termination on Windows (SIGTERM before SIGKILL equivalent)
-- Better error handling for platform-specific operations
+---
 
-**Configuration & Usability:**
-- Added `.hotreload.yaml` configuration file support
-- CLI flags override config file values for flexibility
-- `--init` flag to generate example configuration
-- Added `.hotreloadignore` for custom directory ignore patterns
-- Improved error messages and logging
+## Installation
 
-**Code Quality:**
-- All tests pass with `-race` flag enabled
-- Comprehensive test coverage across all packages
-- Better error handling in proxy for malformed responses
-- Removed unused fields and dead code
+### Prerequisites
+- **Go:** 1.22+ (verified on Go 1.22, 1.23, and 1.24)
+- **Make:** Optional, for building from source or running demos
 
-All changes maintain backward compatibility with existing usage patterns.
+### From Source
+
+```bash
+git clone https://github.com/shravansumanthanan/hot-reload-engine-go.git
+cd hot-reload-engine-go
+make build
+```
+
+The compiled binary will be placed at `./hotreload`.
+
+---
+
+## Configuration Reference
+
+### `.hotreload.yaml`
+
+The configuration file is automatically loaded from the current directory if present.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `root` | `string` | `.` | The project directory root to monitor. |
+| `build` | `string` | `""` | Command to build/compile your application. |
+| `exec` | `string` | `""` | Command to start your application binary. |
+| `extensions` | `[]string` | `[.go]` | File extensions that trigger a reload. |
+| `ignore` | `[]string` | `[]` | Extra directories to exclude from monitoring. |
+| `proxy` | `string` | `""` | Proxy ports formatted as `<proxy_port>:<app_port>` (e.g., `8080:8081`). |
+| `log_level` | `string` | `debug` | Logging verbosity: `debug`, `info`, `warn`, `error`. |
+
+### `.hotreloadignore`
+
+You can exclude specific folders or files from triggering reloads by creating a `.hotreloadignore` file in your root folder. Lines starting with `#` are ignored.
+
+```text
+# Exclude testing outputs and docs
+bin/
+docs/
+*.tmp
+vendor/
+```
+
+### CLI Flags
+
+CLI flags override settings specified in `.hotreload.yaml`.
+
+```bash
+# Example overrides:
+hotreload --root ./web --build "go build -o app" --exec "./app" --log-level info
+```
+
+- `--root` (string): Project root directory to watch.
+- `--build` (string): Command to compile the project.
+- `--exec` (string): Command to execute the built binary.
+- `--ext` (string): Comma-separated list of file extensions to watch.
+- `--ignore` (string): Comma-separated list of directories to ignore.
+- `--proxy` (string): Live-reload proxy port map (e.g., `8080:8081`).
+- `--log-level` (string): Log level (`debug`, `info`, `warn`, `error`).
+- `--config` (string): Path to configuration file (default: `.hotreload.yaml`).
+- `--init` (bool): Generate an example `.hotreload.yaml` configuration file.
+- `--version` (bool): Print version and exit.
+
+---
+
+## Demos & Testing
+
+The repository includes a sample `testserver` which you can use to experiment with all features.
+
+### Run the standard reload demo:
+```bash
+make demo
+```
+This builds `hotreload`, runs the test server on port `8081`, and mounts the proxy on port `8080`.
+1. Open your browser to `http://localhost:8080`.
+2. Edit `./testserver/main.go` (e.g., change the text in the response or logs).
+3. Save the file.
+4. **Observe:** The server rebuilds, restarts, and the browser page refreshes automatically!
+
+### Run the crash loop demo:
+```bash
+make demo-crash
+```
+This runs the test server in crash-mode, causing it to exit immediately on startup.
+- **Observe:** `hotreload` detects the rapid crash cycle, throttles the CPU load by applying an exponential backoff delay, and prints status logs tracking the current backoff delay.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details on code style, testing guidelines, and submission workflows.
+
+To run tests with the Go race detector:
+```bash
+make test-race
+```
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

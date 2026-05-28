@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -88,7 +89,9 @@ func TestMergeWithFlags(t *testing.T) {
 	proxyFlag := ""
 	logLevelFlag := "debug"
 
-	cfg.MergeWithFlags(&rootFlag, &buildFlag, &execFlag, &extFlag, &ignoreFlag, &proxyFlag, &logLevelFlag)
+	// No CLI flags were explicitly set — config file values should win.
+	explicitFlags := map[string]bool{}
+	cfg.MergeWithFlags(&rootFlag, &buildFlag, &execFlag, &extFlag, &ignoreFlag, &proxyFlag, &logLevelFlag, explicitFlags)
 
 	if rootFlag != "./config-root" {
 		t.Errorf("Expected root from config, got '%s'", rootFlag)
@@ -121,7 +124,9 @@ func TestMergeWithFlags(t *testing.T) {
 	proxyFlag2 := ""
 	logLevelFlag2 := "debug"
 
-	cfg2.MergeWithFlags(&rootFlag2, &buildFlag2, &execFlag2, &extFlag2, &ignoreFlag2, &proxyFlag2, &logLevelFlag2)
+	// root, build, exec were explicitly set from CLI — they should override config.
+	explicitFlags2 := map[string]bool{"root": true, "build": true, "exec": true}
+	cfg2.MergeWithFlags(&rootFlag2, &buildFlag2, &execFlag2, &extFlag2, &ignoreFlag2, &proxyFlag2, &logLevelFlag2, explicitFlags2)
 
 	if rootFlag2 != "./cli-root" {
 		t.Errorf("Expected CLI root to override config, got '%s'", rootFlag2)
@@ -154,17 +159,14 @@ func TestWriteExampleConfig(t *testing.T) {
 	}
 
 	// Should contain key sections
-	if !contains(content, "root:") {
+	if !strings.Contains(content, "root:") {
 		t.Error("Example config missing 'root' field")
 	}
-	if !contains(content, "build:") {
+	if !strings.Contains(content, "build:") {
 		t.Error("Example config missing 'build' field")
 	}
-	if !contains(content, "exec:") {
+	if !strings.Contains(content, "exec:") {
 		t.Error("Example config missing 'exec' field")
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr)))
-}

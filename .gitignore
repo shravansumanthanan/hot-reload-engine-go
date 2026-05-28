@@ -25,6 +25,15 @@ vendor/
 # Hotreload config (user-specific)
 .hotreload.yaml
 
+# Hotreload ignore file (user-specific)
+.hotreloadignore
+
 # Temp files
 *.tmp
 *.log
+
+# Test server build output
+testserver/bin/
+
+# GoReleaser build output
+dist/

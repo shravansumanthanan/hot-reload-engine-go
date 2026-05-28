@@ -116,7 +116,7 @@ func (w *Watcher) watchRecursive(dir string) error {
 		}
 
 		if info.IsDir() {
-			if w.ignores[info.Name()] {
+			if w.shouldIgnoreDir(path, info.Name()) {
 				return filepath.SkipDir
 			}
 
@@ -131,6 +131,23 @@ func (w *Watcher) watchRecursive(dir string) error {
 	})
 }
 
+// shouldIgnoreDir returns true if a directory should be skipped.
+// It checks both the directory's base name and its path relative to the
+// watch root, so both simple patterns ("vendor") and path-based patterns
+// ("internal/generated") are supported.
+func (w *Watcher) shouldIgnoreDir(absPath, baseName string) bool {
+	// Check by base name (most common case: "node_modules", "vendor", etc.)
+	if w.ignores[baseName] {
+		return true
+	}
+	// Check by path relative to the watch root (e.g. "internal/generated")
+	relPath, err := filepath.Rel(w.root, absPath)
+	if err == nil && w.ignores[relPath] {
+		return true
+	}
+	return false
+}
+
 func (w *Watcher) readEvents() {
 	for {
 		select {
@@ -143,7 +160,7 @@ func (w *Watcher) readEvents() {
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				info, err := os.Stat(event.Name)
 				if err == nil && info.IsDir() {
-					if !w.ignores[info.Name()] {
+					if !w.shouldIgnoreDir(event.Name, info.Name()) {
 						if err := w.watchRecursive(event.Name); err != nil {
 							slog.Error("Failed to watch new directory", "path", event.Name, "err", err)
 						}
