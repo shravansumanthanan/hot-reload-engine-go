@@ -1,26 +1,212 @@
-# 🔥 Hotreload CLI
+<div align="center">
 
-> A high-performance, cross-platform CLI tool in Go that watches your project files, automatically rebuilds and restarts your application, and injects a real-time live-reload script into your web browser.
+# 🔥 hotreload
+
+### **Zero-friction live reload for any Go project — and beyond.**
+
+*Stop. Compile. Restart. Refresh. Repeat.*  
+*Never again.*
+
+<br/>
 
 [![CI Status](https://github.com/shravansumanthanan/hot-reload-engine-go/actions/workflows/ci.yml/badge.svg)](https://github.com/shravansumanthanan/hot-reload-engine-go/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/shravansumanthanan/hot-reload-engine-go)](https://github.com/shravansumanthanan/hot-reload-engine-go)
 [![Release Version](https://img.shields.io/github/v/release/shravansumanthanan/hot-reload-engine-go)](https://github.com/shravansumanthanan/hot-reload-engine-go/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/shravansumanthanan/hot-reload-engine-go)](https://goreportcard.com/report/github.com/shravansumanthanan/hot-reload-engine-go)
+[![GoDoc](https://pkg.go.dev/badge/github.com/shravansumanthanan/hot-reload-engine-go.svg)](https://pkg.go.dev/github.com/shravansumanthanan/hot-reload-engine-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/shravansumanthanan/hot-reload-engine-go?style=social)](https://github.com/shravansumanthanan/hot-reload-engine-go/stargazers)
+
+<br/>
+
+<!-- demo gif here — record with vhs or asciinema and drop it in /docs/demo.gif -->
+
+**[Quick Start](#-quick-start) · [Features](#-features) · [Configuration](#-configuration-reference) · [Architecture](#%EF%B8%8F-how-it-works) · [Contributing](#-contributing)**
+
+</div>
 
 ---
 
-## Why This Exists
+## The Problem Every Developer Knows
 
-During local development, manually stopping your server, compiling your changes, and refreshing your browser is a friction-filled flow. Typical file watchers often fail in key areas:
-- **Orphaned Processes:** They kill the main process but leave child processes running, causing "address already in use" errors on the next build.
-- **Resource Exhaustion:** Rapidly saving files causes a storm of concurrent, overlapping compiles that freeze the CPU.
-- **Crash Loops:** If the app has an initialization bug, the watcher restarts it continuously in an infinite crash loop, spiking machine temperatures.
+You make a one-line change. Now the ritual begins:
 
-`hotreload` is designed specifically to solve these operational pain points. It guarantees complete process group teardown, provides race-free build cancellation, coalesces rapid events, and protects system resources with a jittered exponential backoff crash-monitor.
+```
+Ctrl+C → go build → ./server → Alt+Tab → F5
+```
+
+Do that 50 times a day and you've lost hours to mechanical repetition. Existing tools promise to fix this — and most of them introduce a new set of problems:
+
+| Pain Point | Typical Watcher | `hotreload` |
+|---|:---:|:---:|
+| **Orphaned child processes** ("address already in use") | ❌ Often | ✅ Never |
+| **CPU storms from rapid saves** | ❌ Yes | ✅ Debounced |
+| **Infinite crash loops spiking your CPU** | ❌ Yes | ✅ Backoff + jitter |
+| **Browser refresh is manual** | ❌ Usually | ✅ SSE auto-refresh |
+| **Mid-build saves ignored** | ❌ Sometimes | ✅ Instant cancellation |
+| **Works beyond Go** (Node, Python, Rust…) | ⚠️ Partial | ✅ Any command |
+
+> `hotreload` was built because every other solution either left zombie processes behind, thrashed the CPU, or made you glue together three separate tools to get a working feedback loop.
 
 ---
 
-## How It Works (Architecture)
+## ⚡ Quick Start
+
+Get running in under 60 seconds.
+
+### Install
+
+```bash
+go install github.com/shravansumanthanan/hot-reload-engine-go@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/shravansumanthanan/hot-reload-engine-go.git
+cd hot-reload-engine-go
+make build
+```
+
+### Initialize & Run
+
+```bash
+# 1. Drop a config file in your project root
+hotreload --init
+
+# 2. That's it. Start the loop.
+hotreload
+```
+
+`--init` generates a `.hotreload.yaml` pre-filled with sensible defaults. Edit it once, never again.
+
+---
+
+## 🚀 Real-World Use Cases
+
+### Go Web Server (Default)
+
+```yaml
+# .hotreload.yaml
+root: .
+build: "go build -o ./bin/server ./cmd/server"
+exec: "./bin/server"
+extensions: [.go, .yaml, .html, .tmpl]
+ignore: [vendor, node_modules, .git]
+proxy: "8080:8081"
+```
+
+Open `http://localhost:8080` — every save auto-reloads the page. No browser extension needed.
+
+---
+
+### Node.js / TypeScript
+
+```yaml
+root: .
+build: "npm run build"
+exec: "node dist/index.js"
+extensions: [.ts, .js, .json]
+ignore: [node_modules, dist]
+```
+
+---
+
+### Python (FastAPI / Flask)
+
+```yaml
+root: .
+build: ""           # no build step needed
+exec: "uvicorn main:app --port 8081"
+extensions: [.py, .env]
+ignore: [__pycache__, .venv]
+proxy: "8080:8081"
+```
+
+---
+
+### Rust
+
+```yaml
+root: .
+build: "cargo build"
+exec: "./target/debug/myapp"
+extensions: [.rs, .toml]
+ignore: [target]
+```
+
+---
+
+### Any Language, Any Command
+
+`hotreload` doesn't care what you're building. If it can be expressed as a shell command, it works.
+
+---
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%">
+
+### ⚡ Instant Build Cancellation
+Save a file mid-compile? The active compiler process is **cancelled immediately** — no waiting for a stale build to finish before starting the fresh one.
+
+</td>
+<td width="50%">
+
+### 🛑 Zero Zombie Processes
+Every restart terminates the **entire process group** (PGID) — graceful `SIGTERM` first, then `SIGKILL` on timeout. Windows gets `taskkill /T`. No orphans. Ever.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### ⏱️ Timed Debouncing
+Rapid saves within `100ms` are **coalesced into a single trigger**. Your CPU won't melt just because your editor auto-saves aggressively.
+
+</td>
+<td width="50%">
+
+### 💥 Crash Loop Backoff
+App panicking on boot? `hotreload` applies **exponential backoff with jitter** so a broken startup doesn't turn into a CPU heater. It throttles automatically and recovers gracefully.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🌐 Live-Reload Proxy
+Acts as a **transparent reverse proxy** that injects a tiny SSE script into HTML responses. Your browser tab reloads the moment a build succeeds — no browser extension, no manual refresh.
+
+</td>
+<td width="50%">
+
+### 📁 Dynamic Directory Watching
+New folders created at runtime are **automatically registered** with the file watcher. You'll never miss an event from a directory that didn't exist when the process started.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🔧 Pre & Post Build Hooks *(v0.2.0)*
+Run arbitrary commands **before and after** each build cycle — lint, codegen, asset bundling, database migrations. Compose your full dev workflow into a single watcher.
+
+</td>
+<td width="50%">
+
+### 📦 Embeddable as a Library *(v0.2.0)*
+Import `hotreload` as a Go package to wire live-reload directly into your **own CLI tools or dev servers** — no external binary required.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🏗️ How It Works
 
 ```mermaid
 graph TD
@@ -33,37 +219,27 @@ graph TD
     G -->|Injects SSE Script| H[Browser Clients]
 ```
 
-1. **Watcher:** Monitor directories recursively using OS-native events, ignoring editor swap files and dependencies.
-2. **Debouncer:** Coalesce rapid, consecutive file saves into a single build trigger.
-3. **Manager:** Oversee the build and runner loops. When a new trigger arrives during a build, the active compile is cancelled immediately.
-4. **Runner:** Launch the application in its own process group. It uses platform-specific system calls to guarantee that child processes are completely torn down before any rebuild.
-5. **Proxy:** Inject an SSE (Server-Sent Events) live-reload script into HTML content, proxying standard requests to the application and automatically refreshing open browser tabs when a rebuild completes.
+### What Makes This Different
+
+Most file-watchers are a thin shell around `fsnotify` and `os.exec`. `hotreload` is designed from first principles around **operational correctness**:
+
+1. **Watcher** — Monitors directories recursively via OS-native events, skipping editor swap files (`.swp`, `~`) and dependency folders.
+2. **Debouncer** — A timer-based coalescer ensures that 20 saves in 50ms become exactly one build trigger.
+3. **Manager** — The central coordinator. An incoming trigger during an active build propagates a `context.CancelFunc` to the compiler goroutine — *not* a `SIGKILL` to the process — making cancellation race-free at the Go level.
+4. **Runner** — Spawns the application in its own **process group**. On UNIX this means `Setpgid: true` + `syscall.Kill(-pgid, ...)` — every child inherits the group and is torn down atomically. No port conflicts on the next start.
+5. **Proxy** — An `httputil.ReverseProxy` intercepts responses, and for `text/html` content it streams in a 200-byte SSE script. The script opens an `EventSource` to the proxy; on rebuild, the proxy fires a `reload` event and the browser acts immediately.
+
+The result: a feedback loop that is **deterministic, resource-safe, and browser-aware** without requiring any external daemon or browser plugin.
 
 ---
 
-## Quick Start
+## 📦 Configuration Reference
 
-You can get `hotreload` running on your local machine in under a minute.
-
-### 1. Install
-
-```bash
-go install github.com/shravansumanthanan/hot-reload-engine-go@latest
-```
-
-### 2. Configure Your Project
-
-Initialize a configuration file in your project's root:
-
-```bash
-hotreload --init
-```
-
-This creates a `.hotreload.yaml` file. Edit it to specify your build and run commands:
+### `.hotreload.yaml`
 
 ```yaml
 root: .
-build: "go build -o ./bin/server main.go"
+build: "go build -o ./bin/server ./cmd/server"
 exec: "./bin/server"
 extensions:
   - .go
@@ -72,129 +248,140 @@ ignore:
   - tmp
   - vendor
 proxy: "8080:8081"
+log_level: info
 ```
-
-### 3. Run
-
-```bash
-hotreload
-```
-
----
-
-## Features
-
-- **⚡ Instant Interruption:** If you save a file while a build is running, `hotreload` immediately cancels the ongoing compiler process and schedules a fresh build.
-- **🛑 Zero Zombie Processes:** Restarts terminate the entire process group (PGID) using graceful `SIGTERM` followed by a `SIGKILL` timeout. On Windows, it handles process tree cleanup via `taskkill`.
-- **⏱️ Timed Debouncing:** File saves within `100ms` of each other are coalesced into a single rebuild event to prevent unnecessary CPU usage.
-- **💥 Crash Loop Backoff:** If your app panics or crashes instantly on boot, `hotreload` uses exponential backoff with jitter to delay restarts, protecting your CPU.
-- **🌐 Live-Reload Proxy:** Serves as a transparent reverse proxy that injects a light SSE script into your HTML responses, reloading your browser page whenever a backend build succeeds.
-- **📁 Dynamic Directory Watching:** Automatically detects newly created folders during runtime and registers them with the watcher.
-
----
-
-## Installation
-
-### Prerequisites
-- **Go:** 1.22+ (verified on Go 1.22, 1.23, and 1.24)
-- **Make:** Optional, for building from source or running demos
-
-### From Source
-
-```bash
-git clone https://github.com/shravansumanthanan/hot-reload-engine-go.git
-cd hot-reload-engine-go
-make build
-```
-
-The compiled binary will be placed at `./hotreload`.
-
----
-
-## Configuration Reference
-
-### `.hotreload.yaml`
-
-The configuration file is automatically loaded from the current directory if present.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `root` | `string` | `.` | The project directory root to monitor. |
-| `build` | `string` | `""` | Command to build/compile your application. |
-| `exec` | `string` | `""` | Command to start your application binary. |
-| `extensions` | `[]string` | `[.go]` | File extensions that trigger a reload. |
-| `ignore` | `[]string` | `[]` | Extra directories to exclude from monitoring. |
-| `proxy` | `string` | `""` | Proxy ports formatted as `<proxy_port>:<app_port>` (e.g., `8080:8081`). |
-| `log_level` | `string` | `debug` | Logging verbosity: `debug`, `info`, `warn`, `error`. |
+| `root` | `string` | `.` | Project directory root to monitor |
+| `build` | `string` | `""` | Shell command to compile your application |
+| `exec` | `string` | `""` | Shell command to start your binary |
+| `extensions` | `[]string` | `[.go]` | Extensions that trigger a rebuild |
+| `ignore` | `[]string` | `[]` | Directories / globs to exclude |
+| `proxy` | `string` | `""` | `<proxy_port>:<app_port>` for live-reload |
+| `log_level` | `string` | `debug` | `debug` · `info` · `warn` · `error` |
 
 ### `.hotreloadignore`
 
-You can exclude specific folders or files from triggering reloads by creating a `.hotreloadignore` file in your root folder. Lines starting with `#` are ignored.
+Works like `.gitignore` — one pattern per line, `#` for comments:
 
-```text
-# Exclude testing outputs and docs
+```
+# build artifacts and generated files
 bin/
-docs/
+dist/
 *.tmp
 vendor/
+__pycache__/
+node_modules/
 ```
 
 ### CLI Flags
 
-CLI flags override settings specified in `.hotreload.yaml`.
+All flags override their `.hotreload.yaml` equivalents.
 
-```bash
-# Example overrides:
-hotreload --root ./web --build "go build -o app" --exec "./app" --log-level info
 ```
-
-- `--root` (string): Project root directory to watch.
-- `--build` (string): Command to compile the project.
-- `--exec` (string): Command to execute the built binary.
-- `--ext` (string): Comma-separated list of file extensions to watch.
-- `--ignore` (string): Comma-separated list of directories to ignore.
-- `--proxy` (string): Live-reload proxy port map (e.g., `8080:8081`).
-- `--log-level` (string): Log level (`debug`, `info`, `warn`, `error`).
-- `--config` (string): Path to configuration file (default: `.hotreload.yaml`).
-- `--init` (bool): Generate an example `.hotreload.yaml` configuration file.
-- `--version` (bool): Print version and exit.
+--root         string   Project root directory to watch
+--build        string   Command to compile the project
+--exec         string   Command to execute the binary
+--ext          string   Comma-separated file extensions to watch
+--ignore       string   Comma-separated directories to ignore
+--proxy        string   Live-reload proxy map (e.g. 8080:8081)
+--log-level    string   Log verbosity (debug|info|warn|error)
+--config       string   Path to config file (default: .hotreload.yaml)
+--init                  Generate an example .hotreload.yaml
+--version               Print version and exit
+```
 
 ---
 
-## Demos & Testing
+## 🧪 Demos & Testing
 
-The repository includes a sample `testserver` which you can use to experiment with all features.
+The repo ships a `testserver` so you can see every feature working in under 2 minutes.
 
-### Run the standard reload demo:
+### Interactive live-reload demo
+
 ```bash
 make demo
 ```
-This builds `hotreload`, runs the test server on port `8081`, and mounts the proxy on port `8080`.
-1. Open your browser to `http://localhost:8080`.
-2. Edit `./testserver/main.go` (e.g., change the text in the response or logs).
-3. Save the file.
-4. **Observe:** The server rebuilds, restarts, and the browser page refreshes automatically!
 
-### Run the crash loop demo:
+1. Open `http://localhost:8080` in your browser.
+2. Edit `./testserver/main.go` — change a string, save.
+3. Watch the terminal compile and the browser tab refresh automatically.
+
+### Crash-loop backoff demo
+
 ```bash
 make demo-crash
 ```
-This runs the test server in crash-mode, causing it to exit immediately on startup.
-- **Observe:** `hotreload` detects the rapid crash cycle, throttles the CPU load by applying an exponential backoff delay, and prints status logs tracking the current backoff delay.
 
----
+The test server exits immediately on startup. Watch `hotreload` detect the crash cycle, apply jittered backoff, and print the growing delay between retries — all without pegging the CPU.
 
-## Contributing
+### Run tests with the race detector
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details on code style, testing guidelines, and submission workflows.
-
-To run tests with the Go race detector:
 ```bash
 make test-race
 ```
 
 ---
 
-## License
+## 🏁 Comparison vs. Alternatives
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+| Feature | `hotreload` | [air](https://github.com/air-verse/air) | [realize](https://github.com/oxequa/realize) | nodemon |
+|---|:---:|:---:|:---:|:---:|
+| Process group teardown | ✅ | ⚠️ | ⚠️ | ⚠️ |
+| Mid-build cancellation | ✅ | ✅ | ❌ | ❌ |
+| Crash loop backoff | ✅ | ❌ | ❌ | ❌ |
+| Built-in live-reload proxy | ✅ | ❌ | ❌ | ❌ |
+| Works beyond Go | ✅ | ❌ | ❌ | Node only |
+| Embeddable as a library | ✅ | ❌ | ❌ | ❌ |
+| Zero config needed | ✅ | ⚠️ | ❌ | ✅ |
+
+---
+
+## 🤝 Contributing
+
+Contributions are very welcome — whether it's a bug report, a feature idea, or a pull request.
+
+**New to the project?** Start here:
+- 🐛 Browse [`good first issue`](https://github.com/shravansumanthanan/hot-reload-engine-go/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) issues — they're specifically scoped for first-time contributors.
+- 💬 Start or join a [Discussion](https://github.com/shravansumanthanan/hot-reload-engine-go/discussions) if you have a design question or want to propose something bigger.
+
+**Before submitting a PR:**
+
+```bash
+# Run the full test suite with the race detector
+make test-race
+
+# Ensure code is formatted
+gofmt -w .
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for code style, branch conventions, and review guidelines.
+
+---
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=shravansumanthanan/hot-reload-engine-go&type=Date)](https://star-history.com/#shravansumanthanan/hot-reload-engine-go&Date)
+
+---
+
+## 🌟 Show Your Support
+
+If `hotreload` saves you time or frustration, the best way to support it is a ⭐ — it helps other developers discover the project.
+
+[![Star on GitHub](https://img.shields.io/github/stars/shravansumanthanan/hot-reload-engine-go?style=social)](https://github.com/shravansumanthanan/hot-reload-engine-go/stargazers)
+
+---
+
+## 📄 License
+
+MIT © [Shravan Sumanthanan](https://github.com/shravansumanthanan) — see [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+**Keywords:** `go live reload` · `hot reload go` · `file watcher cli` · `go devtools` · `go hot reload server` · `golang watch rebuild` · `live reload proxy` · `go development workflow` · `go air alternative` · `auto restart go server`
+
+</div>
