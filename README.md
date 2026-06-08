@@ -360,12 +360,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for code style, branch conventions, and r
 
 ---
 
-## 📈 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=shravansumanthanan/hot-reload-engine-go&type=Date)](https://star-history.com/#shravansumanthanan/hot-reload-engine-go&Date)
-
----
-
 ## 🌟 Show Your Support
 
 If `hotreload` saves you time or frustration, the best way to support it is a ⭐ — it helps other developers discover the project.
