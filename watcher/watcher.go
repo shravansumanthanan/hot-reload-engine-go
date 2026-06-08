@@ -42,7 +42,7 @@ type Watcher struct {
 	root           string
 	Events         chan string
 	Errors         chan error
-	exts           []string
+	exts           map[string]struct{}
 	ignorePatterns []string // glob patterns, matched via filepath.Match
 }
 
@@ -73,10 +73,10 @@ func New(root string, exts []string, ignores []string) (*Watcher, error) {
 		patterns = append(patterns, hotreloadIgnores...)
 	}
 
-	validExts := []string{}
+	extMap := make(map[string]struct{}, len(exts))
 	for _, ext := range exts {
-		if ext != "" {
-			validExts = append(validExts, strings.TrimSpace(ext))
+		if ext = strings.TrimSpace(ext); ext != "" {
+			extMap[ext] = struct{}{}
 		}
 	}
 
@@ -85,7 +85,7 @@ func New(root string, exts []string, ignores []string) (*Watcher, error) {
 		root:           root,
 		Events:         make(chan string, 100),
 		Errors:         make(chan error, 10),
-		exts:           validExts,
+		exts:           extMap,
 		ignorePatterns: patterns,
 	}, nil
 }
@@ -218,12 +218,8 @@ func (w *Watcher) isInterestingFile(path string) bool {
 	if len(w.exts) == 0 {
 		return true
 	}
-	for _, ext := range w.exts {
-		if strings.HasSuffix(path, ext) {
-			return true
-		}
-	}
-	return false
+	_, ok := w.exts[filepath.Ext(path)]
+	return ok
 }
 
 // isTempFile returns true if the file path looks like a temporary editor file.

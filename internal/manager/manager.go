@@ -45,6 +45,8 @@ const (
 type Manager struct {
 	buildCmd  string
 	execCmd   string
+	preBuild  string // optional hook run before each build
+	postBuild string // optional hook run after each successful build
 	liveProxy LiveReloader
 
 	buildCancel context.CancelFunc
@@ -58,10 +60,12 @@ type Manager struct {
 }
 
 // NewManager creates a Manager and starts its background loop.
-func NewManager(buildCmd, execCmd string, liveProxy LiveReloader) *Manager {
+func NewManager(buildCmd, execCmd, preBuild, postBuild string, liveProxy LiveReloader) *Manager {
 	m := &Manager{
 		buildCmd:  buildCmd,
 		execCmd:   execCmd,
+		preBuild:  preBuild,
+		postBuild: postBuild,
 		liveProxy: liveProxy,
 		triggerCh: make(chan struct{}, 1),
 		stopCh:    make(chan struct{}),
@@ -131,6 +135,21 @@ func (m *Manager) runCycle() {
 	}
 	m.mu.Unlock()
 
+	// Run optional pre-build hook.
+	if m.preBuild != "" {
+		slog.Info("Running pre-build hook", "cmd", m.preBuild)
+		if err := process.Build(buildCtx, m.preBuild); err != nil {
+			m.mu.Lock()
+			m.buildCancel = nil
+			m.mu.Unlock()
+			if buildCtx.Err() != nil {
+				return
+			}
+			slog.Error("Pre-build hook failed", "err", err)
+			return
+		}
+	}
+
 	// Run build — blocks but is cancellable via context.
 	err := process.Build(buildCtx, m.buildCmd)
 
@@ -144,6 +163,15 @@ func (m *Manager) runCycle() {
 			return // Build was cancelled by a newer file change.
 		}
 		return // Build failed legitimately; wait for next trigger.
+	}
+
+	// Run optional post-build hook (build succeeded).
+	if m.postBuild != "" {
+		slog.Info("Running post-build hook", "cmd", m.postBuild)
+		// Use a fresh background context: the build context is already done.
+		if err := process.Build(context.Background(), m.postBuild); err != nil {
+			slog.Warn("Post-build hook failed (continuing)", "err", err)
+		}
 	}
 
 	m.mu.Lock()

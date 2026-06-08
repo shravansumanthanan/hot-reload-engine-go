@@ -169,12 +169,18 @@ func main() {
 	}
 
 	// Manager handles build/exec coordination.
-	m := manager.NewManager(*buildCommand, *execCommand, liveProxy)
+	preBuild := ""
+	postBuild := ""
+	if cfg != nil {
+		preBuild = cfg.PreBuild
+		postBuild = cfg.PostBuild
+	}
+	m := manager.NewManager(*buildCommand, *execCommand, preBuild, postBuild, liveProxy)
 	defer m.Stop()
 
 	// Setup Debouncer for file events before triggering the initial build.
 	// This ensures no file-change events are missed during the first build.
-	db := debouncer.New(defaultDebounceDelay, func() {
+	db := debouncer.New(ctx, defaultDebounceDelay, func() {
 		slog.Info("Changes detected, scheduling rebuild")
 		m.TriggerBuild()
 	})

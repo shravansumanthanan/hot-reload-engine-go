@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.2.0] — 2026-06-08
+
+### Added
+- **Pre/post build hooks**: New `pre_build` and `post_build` YAML config keys run optional shell commands before and after each successful build (e.g. `go generate ./...`, notification webhooks). Both hooks are cancellable via the same context as the main build.
+- **Config as importable library**: All configuration logic moved to `internal/config` package, making `Config`, `LoadConfig`, and `WriteExampleConfig` importable by external tools and IDE plugins without depending on `package main`.
+
+### Changed
+- **SSE reconnect backoff**: Browser live-reload reconnect script now uses exponential backoff (500ms → 30s cap, up to 120 attempts ≈ ~1 hour budget) instead of fixed-interval polling that timed out after 15 seconds, fixing stale browser pages during long builds.
+- **Debouncer**: `New()` now accepts a `context.Context`; the background goroutine exits on either `ctx.Done()` or `Stop()`, whichever fires first, removing a subtle shutdown ordering dependency.
+- **Watcher extension matching**: Internal extension list replaced with a `map[string]struct{}` for O(1) lookup using `filepath.Ext()`; previously O(n) linear scan.
+
 ### Added
 - `LICENSE` file (MIT).
 - `CONTRIBUTING.md`, `SECURITY.md`, and PR template.

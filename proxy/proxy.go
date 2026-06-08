@@ -226,17 +226,27 @@ const injectedScript = `
 		evtSource.onerror = function() {
 			evtSource.close();
 			let attempts = 0;
-			let checkInterval = setInterval(async () => {
+			let delay = 500;
+			const maxDelay = 30000;
+			const maxAttempts = 120;
+			function retry() {
 				attempts++;
-				if (attempts > 30) { clearInterval(checkInterval); return; }
-				try {
-					const res = await fetch(window.location.href, { cache: "no-store", method: "HEAD" });
-					if (res.ok) {
-						clearInterval(checkInterval);
-						window.location.reload();
-					}
-				} catch (e) {}
-			}, 500);
+				if (attempts > maxAttempts) return;
+				fetch(window.location.href, { cache: "no-store", method: "HEAD" })
+					.then(function(res) {
+						if (res.ok) {
+							window.location.reload();
+						} else {
+							delay = Math.min(delay * 2, maxDelay);
+							setTimeout(retry, delay);
+						}
+					})
+					.catch(function() {
+						delay = Math.min(delay * 2, maxDelay);
+						setTimeout(retry, delay);
+					});
+			}
+			setTimeout(retry, delay);
 		};
 	})();
 </script>

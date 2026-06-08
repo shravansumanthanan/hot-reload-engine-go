@@ -10,7 +10,7 @@ import (
 func TestManagerTriggerBuild(t *testing.T) {
 	// Use safe OS-agnostic echo commands to test Manager control flow
 	// without depending on a full Go build.
-	m := manager.NewManager("echo building", "echo running", nil)
+	m := manager.NewManager("echo building", "echo running", "", "", nil)
 
 	m.TriggerBuild()
 	time.Sleep(200 * time.Millisecond) // allow build+exec cycle to complete
@@ -26,7 +26,7 @@ func TestManagerTriggerBuild(t *testing.T) {
 }
 
 func TestManagerStop(t *testing.T) {
-	m := manager.NewManager("echo building", "echo running", nil)
+	m := manager.NewManager("echo building", "echo running", "", "", nil)
 	m.TriggerBuild()
 	time.Sleep(50 * time.Millisecond)
 
@@ -47,7 +47,7 @@ func TestManagerStop(t *testing.T) {
 func TestManagerCrashLoopProtection(t *testing.T) {
 	// "exit 1" or equivalent: process exits immediately with non-zero status.
 	// On Unix this is handled by sh -c; on Windows by cmd /c.
-	m := manager.NewManager("echo ok", "exit 1", nil)
+	m := manager.NewManager("echo ok", "exit 1", "", "", nil)
 
 	m.TriggerBuild()
 
@@ -61,7 +61,7 @@ func TestManagerCrashLoopProtection(t *testing.T) {
 
 func TestManagerCancelOngoingBuild(t *testing.T) {
 	// A long sleep simulates a slow build.
-	m := manager.NewManager("sleep 2", "echo running", nil)
+	m := manager.NewManager("sleep 2", "echo running", "", "", nil)
 
 	m.TriggerBuild()
 	time.Sleep(100 * time.Millisecond)

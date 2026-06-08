@@ -1,14 +1,16 @@
-package main
+package config_test
 
 import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/shravansumanthanan/hot-reload-engine-go/internal/config"
 )
 
 func TestLoadConfig(t *testing.T) {
 	// Test loading non-existent file (should return nil, nil)
-	cfg, err := LoadConfig("nonexistent.yaml")
+	cfg, err := config.LoadConfig("nonexistent.yaml")
 	if err != nil {
 		t.Fatalf("Expected no error for missing file, got: %v", err)
 	}
@@ -17,8 +19,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Create a temporary config file
-	tmpFile := "test_config.yaml"
-	defer os.Remove(tmpFile)
+	tmpFile := t.TempDir() + "/test_config.yaml"
 
 	content := `root: ./testdir
 build: "make build"
@@ -37,7 +38,7 @@ log_level: info
 	}
 
 	// Load the config
-	cfg, err = LoadConfig(tmpFile)
+	cfg, err = config.LoadConfig(tmpFile)
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
@@ -70,7 +71,7 @@ log_level: info
 }
 
 func TestMergeWithFlags(t *testing.T) {
-	cfg := &Config{
+	cfg := &config.Config{
 		Root:       "./config-root",
 		Build:      "config-build",
 		Exec:       "config-exec",
@@ -81,10 +82,10 @@ func TestMergeWithFlags(t *testing.T) {
 	}
 
 	// Flags with default values (should use config)
-	rootFlag := defaultRootPath
+	rootFlag := config.DefaultRootPath
 	buildFlag := ""
 	execFlag := ""
-	extFlag := defaultWatchExtensions
+	extFlag := config.DefaultWatchExtensions
 	ignoreFlag := ""
 	proxyFlag := ""
 	logLevelFlag := "debug"
@@ -110,7 +111,7 @@ func TestMergeWithFlags(t *testing.T) {
 	}
 
 	// Test CLI flags override config
-	cfg2 := &Config{
+	cfg2 := &config.Config{
 		Root:  "./config-root",
 		Build: "config-build",
 		Exec:  "config-exec",
@@ -119,7 +120,7 @@ func TestMergeWithFlags(t *testing.T) {
 	rootFlag2 := "./cli-root"
 	buildFlag2 := "cli-build"
 	execFlag2 := "cli-exec"
-	extFlag2 := defaultWatchExtensions
+	extFlag2 := config.DefaultWatchExtensions
 	ignoreFlag2 := ""
 	proxyFlag2 := ""
 	logLevelFlag2 := "debug"
@@ -140,10 +141,9 @@ func TestMergeWithFlags(t *testing.T) {
 }
 
 func TestWriteExampleConfig(t *testing.T) {
-	tmpFile := "test_example.yaml"
-	defer os.Remove(tmpFile)
+	tmpFile := t.TempDir() + "/test_example.yaml"
 
-	if err := WriteExampleConfig(tmpFile); err != nil {
+	if err := config.WriteExampleConfig(tmpFile); err != nil {
 		t.Fatalf("Failed to write example config: %v", err)
 	}
 
@@ -172,14 +172,14 @@ func TestWriteExampleConfig(t *testing.T) {
 
 func TestConfigValidate(t *testing.T) {
 	t.Run("valid empty config passes", func(t *testing.T) {
-		cfg := &Config{}
+		cfg := &config.Config{}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Expected no error for empty config, got: %v", err)
 		}
 	})
 
 	t.Run("valid proxy format passes", func(t *testing.T) {
-		cfg := &Config{Proxy: "8080:8081"}
+		cfg := &config.Config{Proxy: "8080:8081"}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -187,7 +187,7 @@ func TestConfigValidate(t *testing.T) {
 
 	t.Run("invalid proxy format fails", func(t *testing.T) {
 		for _, bad := range []string{"8080", "abc:def", "8080:8081:extra", ":8081"} {
-			cfg := &Config{Proxy: bad}
+			cfg := &config.Config{Proxy: bad}
 			if err := cfg.Validate(); err == nil {
 				t.Errorf("Expected error for proxy %q, got nil", bad)
 			}
@@ -196,7 +196,7 @@ func TestConfigValidate(t *testing.T) {
 
 	t.Run("valid log levels pass", func(t *testing.T) {
 		for _, level := range []string{"debug", "info", "warn", "error"} {
-			cfg := &Config{LogLevel: level}
+			cfg := &config.Config{LogLevel: level}
 			if err := cfg.Validate(); err != nil {
 				t.Errorf("Unexpected error for log level %q: %v", level, err)
 			}
@@ -204,35 +204,35 @@ func TestConfigValidate(t *testing.T) {
 	})
 
 	t.Run("invalid log level fails", func(t *testing.T) {
-		cfg := &Config{LogLevel: "verbose"}
+		cfg := &config.Config{LogLevel: "verbose"}
 		if err := cfg.Validate(); err == nil {
 			t.Error("Expected error for invalid log level, got nil")
 		}
 	})
 
 	t.Run("valid health_check URL passes", func(t *testing.T) {
-		cfg := &Config{HealthCheck: "http://localhost:8081/healthz"}
+		cfg := &config.Config{HealthCheck: "http://localhost:8081/healthz"}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
 	})
 
 	t.Run("invalid health_check URL fails", func(t *testing.T) {
-		cfg := &Config{HealthCheck: "localhost:8081/healthz"}
+		cfg := &config.Config{HealthCheck: "localhost:8081/healthz"}
 		if err := cfg.Validate(); err == nil {
 			t.Error("Expected error for health_check without scheme, got nil")
 		}
 	})
 
 	t.Run("non-existent root fails", func(t *testing.T) {
-		cfg := &Config{Root: "/tmp/hotreload-nonexistent-dir-xyz"}
+		cfg := &config.Config{Root: "/tmp/hotreload-nonexistent-dir-xyz"}
 		if err := cfg.Validate(); err == nil {
 			t.Error("Expected error for non-existent root, got nil")
 		}
 	})
 
 	t.Run("existing root passes", func(t *testing.T) {
-		cfg := &Config{Root: t.TempDir()}
+		cfg := &config.Config{Root: t.TempDir()}
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Unexpected error for existing root: %v", err)
 		}

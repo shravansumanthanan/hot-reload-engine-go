@@ -1,6 +1,7 @@
 package debouncer
 
 import (
+	"context"
 	"time"
 )
 
@@ -13,15 +14,17 @@ type Debouncer struct {
 	stop     chan struct{}
 }
 
-// New creates a new Debouncer.
-func New(duration time.Duration, action func()) *Debouncer {
+// New creates a new Debouncer. The provided context controls the debouncer's
+// lifetime: when ctx is cancelled the background goroutine exits cleanly
+// without waiting for Stop() to be called.
+func New(ctx context.Context, duration time.Duration, action func()) *Debouncer {
 	d := &Debouncer{
 		duration: duration,
 		events:   make(chan struct{}, 1),
 		action:   action,
 		stop:     make(chan struct{}),
 	}
-	go d.run()
+	go d.run(ctx)
 	return d
 }
 
@@ -39,7 +42,7 @@ func (d *Debouncer) Stop() {
 	close(d.stop)
 }
 
-func (d *Debouncer) run() {
+func (d *Debouncer) run(ctx context.Context) {
 	var timer *time.Timer
 	var timerC <-chan time.Time
 
@@ -62,6 +65,17 @@ func (d *Debouncer) run() {
 			timer = nil
 			timerC = nil
 			d.action()
+
+		case <-ctx.Done():
+			if timer != nil {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
+			return
 
 		case <-d.stop:
 			if timer != nil {

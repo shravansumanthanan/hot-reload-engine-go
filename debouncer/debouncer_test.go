@@ -1,6 +1,7 @@
 package debouncer
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -9,7 +10,7 @@ import (
 func TestDebouncer(t *testing.T) {
 	var count int32
 
-	d := New(50*time.Millisecond, func() {
+	d := New(context.Background(), 50*time.Millisecond, func() {
 		atomic.AddInt32(&count, 1)
 	})
 	defer d.Stop()
@@ -32,7 +33,7 @@ func TestDebouncer(t *testing.T) {
 func TestDebouncerMultiple(t *testing.T) {
 	var count int32
 
-	d := New(50*time.Millisecond, func() {
+	d := New(context.Background(), 50*time.Millisecond, func() {
 		atomic.AddInt32(&count, 1)
 	})
 	defer d.Stop()
