@@ -22,6 +22,24 @@ const (
 	buildKillTimeout = 1 * time.Second
 )
 
+// ANSI escape codes used to colorize build and app output prefixes.
+// Using raw codes keeps the process package dependency-free.
+const (
+	ansiReset    = "\033[0m"
+	ansiBold     = "\033[1m"
+	ansiBoldCyan = "\033[1;36m" // [build] prefix
+	ansiBoldGreen = "\033[1;32m" // [app]   prefix
+	ansiDim      = "\033[2m"
+)
+
+// buildPrefix / appPrefix are the colorized line prefixes prepended to
+// child-process stdout/stderr so they are visually distinct from hotreload's
+// own structured log lines.
+const (
+	buildPrefix = ansiBoldCyan + "[build]" + ansiReset + ansiDim + " "
+	appPrefix   = ansiBoldGreen + "[app]" + ansiReset + ansiDim + "   "
+)
+
 // prefixWriter wraps an io.Writer and prepends a fixed prefix to every line.
 // This keeps build and app output visually distinct from hotreload's own logs.
 type prefixWriter struct {
@@ -90,7 +108,7 @@ func (r *Runner) Run() error {
 
 	r.cmd = getShellCmd(r.cmdStr)
 
-	pw := newPrefixWriter("[app] ", os.Stdout)
+	pw := newPrefixWriter(appPrefix+ansiReset, os.Stdout)
 	r.cmd.Stdout = pw
 	r.cmd.Stderr = pw
 
@@ -172,7 +190,7 @@ func Build(ctx context.Context, cmdStr string) error {
 	slog.Info("Running build", "cmd", cmdStr)
 	cmd := getShellCmdContext(ctx, cmdStr)
 
-	pw := newPrefixWriter("[build] ", os.Stdout)
+	pw := newPrefixWriter(buildPrefix+ansiReset, os.Stdout)
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 

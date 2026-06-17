@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shravansumanthanan/hot-reload-engine-go/debouncer"
+	"github.com/shravansumanthanan/hot-reload-engine-go/internal/logger"
 	"github.com/shravansumanthanan/hot-reload-engine-go/internal/manager"
 	"github.com/shravansumanthanan/hot-reload-engine-go/proxy"
 	"github.com/shravansumanthanan/hot-reload-engine-go/watcher"
@@ -96,11 +97,7 @@ func main() {
 		level = slog.LevelDebug
 	}
 
-	opts := &slog.HandlerOptions{
-		Level: level,
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, opts))
-	slog.SetDefault(logger)
+	slog.SetDefault(slog.New(logger.NewDefault(level)))
 
 	slog.Info("Starting hotreload", "root", *rootPath, "build", *buildCommand, "exec", *execCommand)
 
@@ -175,7 +172,15 @@ func main() {
 		preBuild = cfg.PreBuild
 		postBuild = cfg.PostBuild
 	}
-	m := manager.NewManager(*buildCommand, *execCommand, preBuild, postBuild, liveProxy)
+	// Guard against the Go typed-nil pitfall: a (*proxy.Proxy)(nil) assigned to
+	// a LiveReloader interface is NOT a nil interface — the nil check inside
+	// manager would pass but the method call would still panic. Pass an explicit
+	// untyped nil when no proxy is configured so the interface value is truly nil.
+	var liveReloader manager.LiveReloader
+	if liveProxy != nil {
+		liveReloader = liveProxy
+	}
+	m := manager.NewManager(*buildCommand, *execCommand, preBuild, postBuild, liveReloader)
 	defer m.Stop()
 
 	// Setup Debouncer for file events before triggering the initial build.

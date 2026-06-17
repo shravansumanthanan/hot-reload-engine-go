@@ -35,18 +35,18 @@ You make a one-line change. Now the ritual begins:
 Ctrl+C → go build → ./server → Alt+Tab → F5
 ```
 
-Do that 50 times a day and you've lost hours to mechanical repetition. Existing tools promise to fix this — and most of them introduce a new set of problems:
+Do that 50 times a day and you've lost hours to mechanical repetition. Existing tools help — but each one has rough edges that bite you in real projects:
 
-| Pain Point | Typical Watcher | `hotreload` |
-|---|:---:|:---:|
-| **Orphaned child processes** ("address already in use") | ❌ Often | ✅ Never |
-| **CPU storms from rapid saves** | ❌ Yes | ✅ Debounced |
-| **Infinite crash loops spiking your CPU** | ❌ Yes | ✅ Backoff + jitter |
-| **Browser refresh is manual** | ❌ Usually | ✅ SSE auto-refresh |
-| **Mid-build saves ignored** | ❌ Sometimes | ✅ Instant cancellation |
-| **Works beyond Go** (Node, Python, Rust…) | ⚠️ Partial | ✅ Any command |
+| Pain Point | What you hit in practice | `hotreload` |
+|---|---|:---:|
+| **Orphaned child processes** ("address already in use") | Happens with most watchers when the app spawns sub-processes | ✅ Full PGID teardown |
+| **CPU storms from rapid saves** | Editor auto-saves fire dozens of events per second | ✅ 100ms debounce |
+| **Infinite crash loops spiking your CPU** | No watcher except `hotreload` throttles rapid crash cycles | ✅ Exponential backoff + jitter |
+| **Browser refresh fires before server is ready** | Fixed sleep-based approaches miss slow-starting apps | ✅ HTTP/TCP readiness probe |
+| **Mid-build saves start a stale build** | Some tools wait for the current build to finish | ✅ Instant build cancellation |
+| **Only works with Go** | Many Go-focused tools can't run `npm run build` or `uvicorn` | ✅ Any shell command |
 
-> `hotreload` was built because every other solution either left zombie processes behind, thrashed the CPU, or made you glue together three separate tools to get a working feedback loop.
+> `hotreload` was built to close the gaps that accumulate over years of Go development — particularly crash-loop CPU saturation and stale browser reloads after partial app startup.
 
 ---
 
@@ -326,15 +326,26 @@ make test-race
 
 ## 🏁 Comparison vs. Alternatives
 
+A focused look at the features where tools meaningfully differ.
+
 | Feature | `hotreload` | [air](https://github.com/air-verse/air) | [realize](https://github.com/oxequa/realize) | nodemon |
 |---|:---:|:---:|:---:|:---:|
-| Process group teardown | ✅ | ⚠️ | ⚠️ | ⚠️ |
+| Process group teardown (no orphan ports) | ✅ PGID kill | ⚠️ Partial | ⚠️ Partial | ⚠️ Partial |
 | Mid-build cancellation | ✅ | ✅ | ❌ | ❌ |
-| Crash loop backoff | ✅ | ❌ | ❌ | ❌ |
-| Built-in live-reload proxy | ✅ | ❌ | ❌ | ❌ |
-| Works beyond Go | ✅ | ❌ | ❌ | Node only |
+| Crash-loop backoff + jitter | ✅ | ❌ | ❌ | ❌ |
+| Live-reload proxy | ✅ Always-on, zero-config | ⚠️ Opt-in, requires `[proxy]` config | ❌ | ❌ |
+| Browser reload timing | ✅ HTTP/TCP readiness probe | ❌ Fires immediately after exec | ❌ | ❌ |
+| Gzip HTML injection | ✅ | ❌ | ❌ | ❌ |
+| Language-agnostic (Node, Python, Rust…) | ✅ Any shell command | ⚠️ Go-focused by design | ⚠️ Go-focused | ✅ Node only |
 | Embeddable as a library | ✅ | ❌ | ❌ | ❌ |
-| Zero config needed | ✅ | ⚠️ | ❌ | ✅ |
+| Pre / post build hooks | ✅ | ✅ | ✅ | ❌ |
+| `.env` file auto-loading | ❌ | ✅ | ❌ | ❌ |
+| Platform-specific build config | ❌ | ✅ `[build.windows]` | ❌ | ❌ |
+| Debugger (`dlv`) entrypoint support | ❌ | ✅ | ❌ | ❌ |
+| Docker image / Homebrew tap | ❌ | ✅ | ❌ | ✅ |
+
+> **Where `hotreload` leads**: crash-loop safety, proxy readiness, and gzip HTML injection.  
+> **Where `air` leads**: ecosystem maturity, `.env` loading, debugger integration, and Docker packaging.
 
 ---
 
