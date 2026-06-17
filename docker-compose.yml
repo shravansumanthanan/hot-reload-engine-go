@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  app:
+    # Use the official golang image as a base or build your own with hotreload installed
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/src
+    ports:
+      - "8080:8080"
+    environment:
+      - ENV_VAR=value
+    # Run hotreload and point to the config if necessary
+    # By default, the ENTRYPOINT in the Dockerfile is hotreload
+    # We pass the flags here, or we can rely on .hotreload.toml in the volume
+    command: ["--build", "go build -o ./bin/server .", "--exec", "./bin/server"]
