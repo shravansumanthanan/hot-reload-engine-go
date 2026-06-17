@@ -7,9 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/joho/godotenv"
 
 	"github.com/shravansumanthanan/hot-reload-engine-go/debouncer"
 	"github.com/shravansumanthanan/hot-reload-engine-go/internal/logger"
@@ -43,6 +46,9 @@ func main() {
 		explicitFlags[f.Name] = true
 	})
 
+	// Load .env file automatically (silently ignore if not found)
+	_ = godotenv.Load()
+
 	// Handle --version flag
 	if *showVersion {
 		fmt.Printf("hotreload version %s\n", version)
@@ -70,6 +76,12 @@ func main() {
 	// Merge config file with CLI flags (CLI flags take precedence).
 	if cfg != nil {
 		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel, explicitFlags)
+		
+		// Apply Windows-specific build override if applicable
+		if runtime.GOOS == "windows" && cfg.BuildWindows != "" && !explicitFlags["build"] {
+			*buildCommand = cfg.BuildWindows
+		}
+
 		if err := cfg.Validate(); err != nil {
 			fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
 			os.Exit(1)

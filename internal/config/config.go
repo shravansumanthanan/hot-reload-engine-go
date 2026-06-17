@@ -3,25 +3,28 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 )
 
 // Config represents the hotreload configuration file structure.
 type Config struct {
-	Root        string   `yaml:"root"`
-	Build       string   `yaml:"build"`
-	Exec        string   `yaml:"exec"`
-	Extensions  []string `yaml:"extensions"`
-	Ignore      []string `yaml:"ignore"`
-	Proxy       string   `yaml:"proxy"`
-	LogLevel    string   `yaml:"log_level"`
-	HealthCheck string   `yaml:"health_check"` // optional HTTP URL polled before broadcasting reload
-	PreBuild    string   `yaml:"pre_build"`    // optional shell command run before each build
-	PostBuild   string   `yaml:"post_build"`   // optional shell command run after a successful build
+	Root         string   `yaml:"root" toml:"root"`
+	Build        string   `yaml:"build" toml:"build"`
+	BuildWindows string   `yaml:"build_windows" toml:"build_windows"`
+	Exec         string   `yaml:"exec" toml:"exec"`
+	Extensions   []string `yaml:"extensions" toml:"extensions"`
+	Ignore       []string `yaml:"ignore" toml:"ignore"`
+	Proxy        string   `yaml:"proxy" toml:"proxy"`
+	LogLevel     string   `yaml:"log_level" toml:"log_level"`
+	HealthCheck  string   `yaml:"health_check" toml:"health_check"` // optional HTTP URL polled before broadcasting reload
+	PreBuild     string   `yaml:"pre_build" toml:"pre_build"`       // optional shell command run before each build
+	PostBuild    string   `yaml:"post_build" toml:"post_build"`     // optional shell command run after a successful build
 }
 
 // validProxyFormat matches "<listen_port>:<target_port>" e.g. "8080:8081".
@@ -60,22 +63,41 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// LoadConfig attempts to load configuration from a .hotreload.yaml file.
+// LoadConfig attempts to load configuration from a file.
 // Returns nil if the file doesn't exist (not an error).
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// If default path is used but missing, try fallbacks
+			if path == ".hotreload.yaml" {
+				if tomlData, err := os.ReadFile(".hotreload.toml"); err == nil {
+					return parseConfig(tomlData, ".toml")
+				}
+				if airData, err := os.ReadFile(".air.toml"); err == nil {
+					return parseConfig(airData, ".toml")
+				}
+			}
 			return nil, nil // Config file is optional
 		}
 		return nil, err
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
+	return parseConfig(data, filepath.Ext(path))
+}
 
+func parseConfig(data []byte, ext string) (*Config, error) {
+	var cfg Config
+	ext = strings.ToLower(ext)
+	if ext == ".toml" {
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
+	}
 	return &cfg, nil
 }
 
@@ -158,6 +180,9 @@ root: .
 
 # Command to build the project
 build: "go build -o ./bin/server ."
+
+# Windows-specific build command override
+# build_windows: "go build -o ./bin/server.exe ."
 
 # Command to execute the built binary
 exec: "./bin/server"
