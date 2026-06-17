@@ -213,61 +213,65 @@ func (m *Manager) runCycle() {
 	m.mu.Unlock()
 
 	// Monitor the process for unexpected exits (crashes).
-	go func(r ProcessRunner, startTime time.Time) {
-		_ = r.Wait()
+	go m.monitorProcess(runnerRef, lastStart)
+}
 
-		// Check if the manager has been stopped before doing anything.
+func (m *Manager) monitorProcess(r ProcessRunner, startTime time.Time) {
+	_ = r.Wait()
+
+	// Check if the manager has been stopped before doing anything.
+	select {
+	case <-m.stopCh:
+		return
+	default:
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// If this is still the active runner, it crashed or exited on its own.
+	// If m.runner != r, it was stopped intentionally by runCycle.
+	if m.runner == r {
+		m.runner = nil
+		slog.Warn("Process exited unexpectedly")
+
+		// Crash loop protection: if the process dies very quickly,
+		// apply exponential backoff with jitter before retrying.
+		duration := time.Since(startTime)
+		if duration < defaultCrashThreshold {
+			m.crashCount++
+
+			// Exponential backoff: 2^(crashCount-1) * 500ms, capped at max.
+			base := time.Duration(1<<uint(m.crashCount-1)) * 500 * time.Millisecond
+			if base > defaultMaxBackoff {
+				base = defaultMaxBackoff
+			}
+			// Add jitter: up to 500ms of random delay.
+			jitter := time.Duration(rand.Int63n(int64(500 * time.Millisecond)))
+			backoff := base + jitter
+
+			slog.Warn("Rapid crash detected, backing off",
+				"wait", backoff.Round(time.Millisecond),
+				"crashes", m.crashCount,
+			)
+
+			go m.scheduleRetry(backoff)
+		} else {
+			m.crashCount = 0
+		}
+	}
+}
+
+func (m *Manager) scheduleRetry(wait time.Duration) {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
 		select {
-		case <-m.stopCh:
-			return
+		case m.triggerCh <- struct{}{}:
 		default:
 		}
-
-		m.mu.Lock()
-		defer m.mu.Unlock()
-
-		// If this is still the active runner, it crashed or exited on its own.
-		// If m.runner != r, it was stopped intentionally by runCycle.
-		if m.runner == runnerRef {
-			m.runner = nil
-			slog.Warn("Process exited unexpectedly")
-
-			// Crash loop protection: if the process dies very quickly,
-			// apply exponential backoff with jitter before retrying.
-			duration := time.Since(startTime)
-			if duration < defaultCrashThreshold {
-				m.crashCount++
-
-				// Exponential backoff: 2^(crashCount-1) * 500ms, capped at max.
-				base := time.Duration(1<<uint(m.crashCount-1)) * 500 * time.Millisecond
-				if base > defaultMaxBackoff {
-					base = defaultMaxBackoff
-				}
-				// Add jitter: up to 500ms of random delay.
-				jitter := time.Duration(rand.Int63n(int64(500 * time.Millisecond)))
-				backoff := base + jitter
-
-				slog.Warn("Rapid crash detected, backing off",
-					"wait", backoff.Round(time.Millisecond),
-					"crashes", m.crashCount,
-				)
-
-				go func(wait time.Duration) {
-					timer := time.NewTimer(wait)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						select {
-						case m.triggerCh <- struct{}{}:
-						default:
-						}
-					case <-m.stopCh:
-						// Manager stopped — do not re-trigger.
-					}
-				}(backoff)
-			} else {
-				m.crashCount = 0
-			}
-		}
-	}(runnerRef, lastStart)
+	case <-m.stopCh:
+		// Manager stopped — do not re-trigger.
+	}
 }

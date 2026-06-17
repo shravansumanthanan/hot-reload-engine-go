@@ -24,62 +24,77 @@ import (
 // version is injected at build time via -ldflags "-X main.version=x.y.z".
 var version = "dev"
 
-func main() {
-	rootPath := flag.String("root", defaultRootPath, "Project root directory to watch")
-	buildCommand := flag.String("build", "", "Command to build the project")
-	execCommand := flag.String("exec", "", "Command to execute the built binary")
-	extFlag := flag.String("ext", defaultWatchExtensions, "Comma-separated list of file extensions to watch")
-	ignoreFlag := flag.String("ignore", "", "Comma-separated list of directories to ignore")
-	proxyFlag := flag.String("proxy", "", "Enable live-reload proxy. Format: <listen_port>:<target_port> (e.g. 8080:8081)")
-	logLevel := flag.String("log-level", "debug", "Log level: debug, info, warn, error")
-	configPath := flag.String("config", ".hotreload.yaml", "Path to configuration file")
-	initConfig := flag.Bool("init", false, "Generate example .hotreload.yaml configuration file")
-	showVersion := flag.Bool("version", false, "Print version and exit")
+type configFlags struct {
+	root         *string
+	buildCommand *string
+	execCommand  *string
+	extFlag      *string
+	ignoreFlag   *string
+	proxyFlag    *string
+	logLevel     *string
+	configPath   *string
+	initConfig   *bool
+	showVersion  *bool
+}
+
+func parseFlags() (configFlags, map[string]bool) {
+	flags := configFlags{
+		root:         flag.String("root", defaultRootPath, "Project root directory to watch"),
+		buildCommand: flag.String("build", "", "Command to build the project"),
+		execCommand:  flag.String("exec", "", "Command to execute the built binary"),
+		extFlag:      flag.String("ext", defaultWatchExtensions, "Comma-separated list of file extensions to watch"),
+		ignoreFlag:   flag.String("ignore", "", "Comma-separated list of directories to ignore"),
+		proxyFlag:    flag.String("proxy", "", "Enable live-reload proxy. Format: <listen_port>:<target_port> (e.g. 8080:8081)"),
+		logLevel:     flag.String("log-level", "debug", "Log level: debug, info, warn, error"),
+		configPath:   flag.String("config", ".hotreload.yaml", "Path to configuration file"),
+		initConfig:   flag.Bool("init", false, "Generate example .hotreload.yaml configuration file"),
+		showVersion:  flag.Bool("version", false, "Print version and exit"),
+	}
 
 	flag.Parse()
 
-	// Collect the set of flags that were explicitly set by the user.
-	// This is the correct way to distinguish "user passed --root ." from
-	// "user didn't pass --root at all and it stayed at the default".
 	explicitFlags := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) {
 		explicitFlags[f.Name] = true
 	})
 
+	return flags, explicitFlags
+}
+
+func setupConfigAndFlags() (configFlags, *Config) {
+	flags, explicitFlags := parseFlags()
+
 	// Load .env file automatically (silently ignore if not found)
 	_ = godotenv.Load()
 
 	// Handle --version flag
-	if *showVersion {
+	if *flags.showVersion {
 		fmt.Printf("hotreload version %s\n", version)
-		return
+		os.Exit(0)
 	}
 
 	// Handle --init flag to generate example config
-	if *initConfig {
-		if err := WriteExampleConfig(*configPath); err != nil {
+	if *flags.initConfig {
+		if err := WriteExampleConfig(*flags.configPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write config file: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Created example configuration file: %s\n", *configPath)
+		fmt.Printf("Created example configuration file: %s\n", *flags.configPath)
 		fmt.Println("Edit this file and run hotreload again.")
-		return
+		os.Exit(0)
 	}
 
-	// Load configuration file if it exists.
-	cfg, err := LoadConfig(*configPath)
+	cfg, err := LoadConfig(*flags.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config file: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Merge config file with CLI flags (CLI flags take precedence).
 	if cfg != nil {
-		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel, explicitFlags)
+		cfg.MergeWithFlags(flags.root, flags.buildCommand, flags.execCommand, flags.extFlag, flags.ignoreFlag, flags.proxyFlag, flags.logLevel, explicitFlags)
 
-		// Apply Windows-specific build override if applicable
 		if runtime.GOOS == "windows" && cfg.BuildWindows != "" && !explicitFlags["build"] {
-			*buildCommand = cfg.BuildWindows
+			*flags.buildCommand = cfg.BuildWindows
 		}
 
 		if err := cfg.Validate(); err != nil {
@@ -88,30 +103,21 @@ func main() {
 		}
 	}
 
-	if *buildCommand == "" || *execCommand == "" {
+	if *flags.buildCommand == "" || *flags.execCommand == "" {
 		fmt.Fprintln(os.Stderr, "Usage: hotreload --root <path> --build <build_cmd> --exec <exec_cmd>")
 		fmt.Fprintln(os.Stderr, "   or: hotreload --init  (to generate example config file)")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	var level slog.Level
-	switch strings.ToLower(*logLevel) {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelDebug
-	}
+	return flags, cfg
+}
 
-	slog.SetDefault(slog.New(logger.NewDefault(level)))
+func main() {
+	flags, cfg := setupConfigAndFlags()
 
-	slog.Info("Starting hotreload", "root", *rootPath, "build", *buildCommand, "exec", *execCommand)
+	slog.SetDefault(slog.New(logger.NewDefault(parseLogLevel(*flags.logLevel))))
+	slog.Info("Starting hotreload", "root", *flags.root, "build", *flags.buildCommand, "exec", *flags.execCommand)
 
 	// Context for graceful shutdown of hotreload itself.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -127,9 +133,9 @@ func main() {
 	}()
 
 	// Start File Watcher.
-	exts := strings.Split(*extFlag, ",")
-	ignores := strings.Split(*ignoreFlag, ",")
-	w, err := watcher.New(*rootPath, exts, ignores)
+	exts := strings.Split(*flags.extFlag, ",")
+	ignores := strings.Split(*flags.ignoreFlag, ",")
+	w, err := watcher.New(*flags.root, exts, ignores)
 	if err != nil {
 		slog.Error("Failed to initialize watcher", "err", err)
 		os.Exit(1)
@@ -141,41 +147,12 @@ func main() {
 	defer w.Close()
 
 	// Start optional live-reload proxy.
-	var liveProxy *proxy.Proxy
-	if *proxyFlag != "" {
-		parts := strings.SplitN(*proxyFlag, ":", 2)
-		if len(parts) != 2 {
-			slog.Error("Invalid proxy format, expected <listen_port>:<target_port>", "value", *proxyFlag)
-			os.Exit(1)
-		}
-		address := ":" + parts[0]
-		targetAddr := "http://127.0.0.1:" + parts[1]
-
-		// Use health_check URL from config if provided, otherwise TCP polling.
-		healthCheckURL := ""
-		if cfg != nil {
-			healthCheckURL = cfg.HealthCheck
-		}
-
-		var proxyErr error
-		liveProxy, proxyErr = proxy.New(address, targetAddr, healthCheckURL)
-		if proxyErr != nil {
-			slog.Error("Failed to initialize proxy", "err", proxyErr)
-			os.Exit(1)
-		}
-		go func() {
-			if err := liveProxy.Start(); err != nil {
-				slog.Error("Proxy server stopped", "err", err)
-			}
-		}()
-		defer func() {
-			shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer shutCancel()
-			if err := liveProxy.Shutdown(shutCtx); err != nil {
-				slog.Warn("Proxy shutdown error", "err", err)
-			}
-		}()
+	liveProxy, err := setupProxy(*flags.proxyFlag, cfg)
+	if err != nil {
+		slog.Error("Failed to initialize proxy", "err", err, "value", *flags.proxyFlag)
+		os.Exit(1)
 	}
+	defer runProxy(liveProxy)()
 
 	// Manager handles build/exec coordination.
 	preBuild := ""
@@ -192,7 +169,7 @@ func main() {
 	if liveProxy != nil {
 		liveReloader = liveProxy
 	}
-	m := manager.NewManager(*buildCommand, *execCommand, preBuild, postBuild, liveReloader)
+	m := manager.NewManager(*flags.buildCommand, *flags.execCommand, preBuild, postBuild, liveReloader)
 	defer m.Stop()
 
 	// Setup Debouncer for file events before triggering the initial build.
@@ -219,6 +196,56 @@ func main() {
 			slog.Error("Watcher error", "err", err)
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+func parseLogLevel(logLevel string) slog.Level {
+	switch strings.ToLower(logLevel) {
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelDebug
+	}
+}
+
+func setupProxy(proxyFlag string, cfg *Config) (*proxy.Proxy, error) {
+	if proxyFlag == "" {
+		return nil, nil
+	}
+	parts := strings.SplitN(proxyFlag, ":", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid proxy format, expected <listen_port>:<target_port>")
+	}
+	address := ":" + parts[0]
+	targetAddr := "http://127.0.0.1:" + parts[1]
+
+	healthCheckURL := ""
+	if cfg != nil {
+		healthCheckURL = cfg.HealthCheck
+	}
+
+	return proxy.New(address, targetAddr, healthCheckURL)
+}
+
+func runProxy(liveProxy *proxy.Proxy) func() {
+	if liveProxy == nil {
+		return func() {}
+	}
+	go func() {
+		if err := liveProxy.Start(); err != nil {
+			slog.Error("Proxy server stopped", "err", err)
+		}
+	}()
+	return func() {
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer shutCancel()
+		if err := liveProxy.Shutdown(shutCtx); err != nil {
+			slog.Warn("Proxy shutdown error", "err", err)
 		}
 	}
 }
