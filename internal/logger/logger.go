@@ -25,24 +25,24 @@ import (
 
 // ANSI escape codes.
 const (
-	reset     = "\033[0m"
-	bold      = "\033[1m"
-	dim       = "\033[2m"
-	fgRed     = "\033[31m"
-	fgGreen   = "\033[32m"
-	fgYellow  = "\033[33m"
-	fgCyan    = "\033[36m"
-	fgWhite   = "\033[97m"
-	fgGray    = "\033[90m"
-	bgRed     = "\033[41m"
+	reset    = "\033[0m"
+	bold     = "\033[1m"
+	dim      = "\033[2m"
+	fgRed    = "\033[31m"
+	fgGreen  = "\033[32m"
+	fgYellow = "\033[33m"
+	fgCyan   = "\033[36m"
+	fgWhite  = "\033[97m"
+	fgGray   = "\033[90m"
+	bgRed    = "\033[41m"
 )
 
 // ColorHandler is a slog.Handler that writes colorised, human-readable log
 // lines to w. It is safe for concurrent use.
 type ColorHandler struct {
-	w       io.Writer
-	opts    slog.HandlerOptions
-	mu      sync.Mutex
+	w        io.Writer
+	opts     slog.HandlerOptions
+	mu       sync.Mutex
 	preAttrs []slog.Attr // attrs added via WithAttrs
 	groups   []string    // active group names
 }

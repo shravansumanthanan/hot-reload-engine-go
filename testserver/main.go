@@ -15,11 +15,11 @@ func main() {
 	crashMode := flag.Bool("crash-mode", false, "Crash immediately to test loop protection")
 	flag.Parse()
 
-	    if *crashMode {
-        log.Println("CRASH MODE: Simulating rapid failure")
-        time.Sleep(100 * time.Millisecond) // Small delay before crash
-        os.Exit(1)
-    }
+	if *crashMode {
+		log.Println("CRASH MODE: Simulating rapid failure")
+		time.Sleep(100 * time.Millisecond) // Small delay before crash
+		os.Exit(1)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

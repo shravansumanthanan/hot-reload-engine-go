@@ -25,11 +25,11 @@ const (
 // ANSI escape codes used to colorize build and app output prefixes.
 // Using raw codes keeps the process package dependency-free.
 const (
-	ansiReset    = "\033[0m"
-	ansiBold     = "\033[1m"
-	ansiBoldCyan = "\033[1;36m" // [build] prefix
+	ansiReset     = "\033[0m"
+	ansiBold      = "\033[1m"
+	ansiBoldCyan  = "\033[1;36m" // [build] prefix
 	ansiBoldGreen = "\033[1;32m" // [app]   prefix
-	ansiDim      = "\033[2m"
+	ansiDim       = "\033[2m"
 )
 
 // buildPrefix / appPrefix are the colorized line prefixes prepended to

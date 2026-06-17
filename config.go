@@ -9,7 +9,7 @@ import "github.com/shravansumanthanan/hot-reload-engine-go/internal/config"
 type Config = config.Config
 
 var (
-	LoadConfig        = config.LoadConfig
+	LoadConfig         = config.LoadConfig
 	WriteExampleConfig = config.WriteExampleConfig
 )
 

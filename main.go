@@ -76,7 +76,7 @@ func main() {
 	// Merge config file with CLI flags (CLI flags take precedence).
 	if cfg != nil {
 		cfg.MergeWithFlags(rootPath, buildCommand, execCommand, extFlag, ignoreFlag, proxyFlag, logLevel, explicitFlags)
-		
+
 		// Apply Windows-specific build override if applicable
 		if runtime.GOOS == "windows" && cfg.BuildWindows != "" && !explicitFlags["build"] {
 			*buildCommand = cfg.BuildWindows
