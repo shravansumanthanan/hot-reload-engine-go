@@ -235,11 +235,15 @@ The result: a feedback loop that is **deterministic, resource-safe, and browser-
 
 ## 📦 Configuration Reference
 
-### `.hotreload.yaml`
+### `.hotreload.yaml` / `.hotreload.toml`
+
+Configuration can be provided as YAML or TOML (also compatible with `.air.toml` for easy migration).
 
 ```yaml
 root: .
 build: "go build -o ./bin/server ./cmd/server"
+# Optional Windows override:
+# build_windows: "go build -o ./bin/server.exe ./cmd/server"
 exec: "./bin/server"
 extensions:
   - .go
@@ -250,6 +254,8 @@ ignore:
 proxy: "8080:8081"
 log_level: info
 ```
+
+_Note: If an `.env` file exists in the directory where `hotreload` is started, it will be automatically loaded into the process environment._
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -291,6 +297,35 @@ All flags override their `.hotreload.yaml` equivalents.
 --init                  Generate an example .hotreload.yaml
 --version               Print version and exit
 ```
+
+---
+
+## 🐳 Docker & Docker Compose
+
+You can easily run `hotreload` within Docker. We provide a `Dockerfile` and `docker-compose.yml` example.
+
+```yaml
+version: '3.8'
+services:
+  app:
+    build: .
+    volumes:
+      - .:/src
+    ports:
+      - "8080:8080"
+    command: ["--build", "go build -o ./bin/server .", "--exec", "./bin/server"]
+```
+
+## 🐛 Debugging with Delve (`dlv`)
+
+Because `hotreload` executes any shell command you provide, you can seamlessly attach Delve for debugging. Just update your `exec` config:
+
+```yaml
+# .hotreload.yaml
+build: "go build -gcflags='all=-N -l' -o ./bin/server ."
+exec: "dlv exec --headless --listen=:2345 --api-version=2 --accept-multiclient ./bin/server"
+```
+Connect your IDE (VSCode, GoLand) to `localhost:2345`!
 
 ---
 
@@ -339,13 +374,14 @@ A focused look at the features where tools meaningfully differ.
 | Language-agnostic (Node, Python, Rust…) | ✅ Any shell command | ⚠️ Go-focused by design | ⚠️ Go-focused | ✅ Node only |
 | Embeddable as a library | ✅ | ❌ | ❌ | ❌ |
 | Pre / post build hooks | ✅ | ✅ | ✅ | ❌ |
-| `.env` file auto-loading | ❌ | ✅ | ❌ | ❌ |
-| Platform-specific build config | ❌ | ✅ `[build.windows]` | ❌ | ❌ |
-| Debugger (`dlv`) entrypoint support | ❌ | ✅ | ❌ | ❌ |
-| Docker image / Homebrew tap | ❌ | ✅ | ❌ | ✅ |
+| `.env` file auto-loading | ✅ | ✅ | ❌ | ❌ |
+| Platform-specific build config | ✅ `build_windows` | ✅ `[build.windows]` | ❌ | ❌ |
+| Debugger (`dlv`) entrypoint support | ✅ Any shell command | ✅ | ❌ | ❌ |
+| Docker Compose / Image support | ✅ | ✅ | ❌ | ✅ |
+| TOML Config formatting | ✅ | ✅ | ❌ | ❌ |
 
-> **Where `hotreload` leads**: crash-loop safety, proxy readiness, and gzip HTML injection.  
-> **Where `air` leads**: ecosystem maturity, `.env` loading, debugger integration, and Docker packaging.
+> **Where `hotreload` leads**: crash-loop safety, proxy readiness, process group teardown, and transparent HTML injection.  
+> **Where `air` leads**: historical ecosystem footprint and Homebrew tap (coming soon to hotreload!).
 
 ---
 
