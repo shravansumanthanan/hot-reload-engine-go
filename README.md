@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔥 hotreload
+# hotreload
 
 ### **Zero-friction live reload for any Go project — and beyond.**
 
