@@ -33,8 +33,14 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: go test (with race detector)
-        run: go test -race -timeout 60s ./...
+      - name: go test (with race detector and coverage)
+        run: go test -race -coverprofile=coverage.out -covermode=atomic -timeout 60s ./...
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
 
       - name: Build binary
         run: go build -o hotreload_${{ matrix.os }} .

@@ -12,7 +12,7 @@
 [![CI Status](https://github.com/shravansumanthanan/hot-reload-engine-go/actions/workflows/ci.yml/badge.svg)](https://github.com/shravansumanthanan/hot-reload-engine-go/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/shravansumanthanan/hot-reload-engine-go)](https://github.com/shravansumanthanan/hot-reload-engine-go)
 [![Release Version](https://img.shields.io/github/v/release/shravansumanthanan/hot-reload-engine-go)](https://github.com/shravansumanthanan/hot-reload-engine-go/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/shravansumanthanan/hot-reload-engine-go?style=flat)](https://goreportcard.com/report/github.com/shravansumanthanan/hot-reload-engine-go)
+[![codecov](https://codecov.io/gh/shravansumanthanan/hot-reload-engine-go/branch/main/graph/badge.svg)](https://codecov.io/gh/shravansumanthanan/hot-reload-engine-go)
 [![GoDoc](https://pkg.go.dev/badge/github.com/shravansumanthanan/hot-reload-engine-go.svg)](https://pkg.go.dev/github.com/shravansumanthanan/hot-reload-engine-go)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/shravansumanthanan/hot-reload-engine-go?style=social)](https://github.com/shravansumanthanan/hot-reload-engine-go/stargazers)
