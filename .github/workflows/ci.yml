@@ -37,6 +37,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out -covermode=atomic -timeout 60s ./...
 
       - name: Upload coverage reports to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.go == '1.24'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
