@@ -2,9 +2,20 @@ package process
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 )
+
+// sleepCmd returns an OS-appropriate shell command that blocks for n seconds.
+// On Windows, cmd.exe does not have a `sleep` built-in; `timeout /t` is used instead.
+func sleepCmd(n int) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("timeout /t %d /nobreak", n)
+	}
+	return fmt.Sprintf("sleep %d", n)
+}
 
 func TestBuildCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -17,7 +28,7 @@ func TestBuildCancellation(t *testing.T) {
 	}()
 
 	start := time.Now()
-	err := Build(ctx, "sleep 5")
+	err := Build(ctx, sleepCmd(5))
 	duration := time.Since(start)
 
 	if err == nil {
@@ -30,7 +41,7 @@ func TestBuildCancellation(t *testing.T) {
 }
 
 func TestRunnerStartStop(t *testing.T) {
-	runner := NewRunner("sleep 10")
+	runner := NewRunner(sleepCmd(10))
 
 	err := runner.Run()
 	if err != nil {

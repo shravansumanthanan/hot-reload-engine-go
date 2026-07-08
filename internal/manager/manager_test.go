@@ -1,11 +1,22 @@
 package manager_test
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/shravansumanthanan/hot-reload-engine-go/internal/manager"
 )
+
+// sleepCmd returns an OS-appropriate shell command that blocks for n seconds.
+// On Windows, cmd.exe does not have a `sleep` built-in; `timeout /t` is used instead.
+func sleepCmd(n int) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("timeout /t %d /nobreak", n)
+	}
+	return fmt.Sprintf("sleep %d", n)
+}
 
 func TestManagerTriggerBuild(t *testing.T) {
 	// Use safe OS-agnostic echo commands to test Manager control flow
@@ -61,7 +72,7 @@ func TestManagerCrashLoopProtection(t *testing.T) {
 
 func TestManagerCancelOngoingBuild(t *testing.T) {
 	// A long sleep simulates a slow build.
-	m := manager.NewManager("sleep 2", "echo running", "", "", nil)
+	m := manager.NewManager(sleepCmd(2), "echo running", "", "", nil)
 
 	m.TriggerBuild()
 	time.Sleep(100 * time.Millisecond)
