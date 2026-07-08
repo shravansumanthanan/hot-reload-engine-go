@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -211,5 +212,161 @@ func TestProxyErrorHandler(t *testing.T) {
 	}
 	if !strings.Contains(body, "window.location.reload") {
 		t.Error("Expected auto-reload logic in error page")
+	}
+}
+
+func TestProxyWaitForTargetTCP(t *testing.T) {
+	// Start a TCP listener that accepts connections.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	// Accept connections in background so WaitForTarget succeeds.
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	p, err := New(":0", "http://"+ln.Addr().String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if !p.WaitForTarget(ctx) {
+		t.Fatal("WaitForTarget should succeed when target is listening")
+	}
+}
+
+func TestProxyWaitForTargetTCPTimeout(t *testing.T) {
+	// Use a port that nothing is listening on.
+	p, err := New(":0", "http://127.0.0.1:1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	if p.WaitForTarget(ctx) {
+		t.Fatal("WaitForTarget should fail when nothing is listening")
+	}
+}
+
+func TestProxyWaitForTargetHTTP(t *testing.T) {
+	// Start a test HTTP server.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	p, err := New(":0", backend.URL, backend.URL+"/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if !p.WaitForTarget(ctx) {
+		t.Fatal("WaitForTarget with HTTP should succeed when backend returns 200")
+	}
+}
+
+func TestProxyWaitForTargetHTTPTimeout(t *testing.T) {
+	// Server returns 500 — should not be considered ready.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer backend.Close()
+
+	p, err := New(":0", backend.URL, backend.URL+"/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	if p.WaitForTarget(ctx) {
+		t.Fatal("WaitForTarget should fail when backend returns 500")
+	}
+}
+
+func TestProxyStartShutdown(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	p, err := New("127.0.0.1:0", backend.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start in background.
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- p.Start()
+	}()
+
+	// Give it time to start.
+	time.Sleep(100 * time.Millisecond)
+
+	// Shutdown.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Start should have returned http.ErrServerClosed.
+	startErr := <-errCh
+	if startErr != http.ErrServerClosed {
+		t.Errorf("Expected ErrServerClosed, got: %v", startErr)
+	}
+}
+
+func TestProxyShutdownNilServer(t *testing.T) {
+	p, err := New(":0", "http://localhost:9999", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Shutdown before Start — should be a no-op.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown on nil server should not error: %v", err)
+	}
+}
+
+func TestProxyModifyResponseNoBodyTag(t *testing.T) {
+	p, _ := New(":0", "http://localhost:9999", "")
+
+	// HTML without </body> — script should be appended at the end.
+	html := `<html><p>No body tag</p></html>`
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/html"}},
+		Body:       io.NopCloser(strings.NewReader(html)),
+	}
+
+	if err := p.modifyResponse(resp); err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "__hotreload_sse") {
+		t.Error("Expected script to be appended even without </body> tag")
 	}
 }
